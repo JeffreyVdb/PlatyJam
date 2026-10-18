@@ -11,6 +11,8 @@ build/
 .cache/
 .parcel-cache/
 .vite/
+.vitest/
+dev-dist/
 .npm/
 .eslintcache
 *.tsbuildinfo

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>PlatyJam</title>
+    <meta name="description" content="Tap the tiles as they reach the line and play the song." />
+    <meta name="theme-color" content="#0d2b3e" />
+    <!-- Home Screen web app (iPadOS). The manifest link is injected by vite-plugin-pwa. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="PlatyJam" />
+    <link rel="icon" href="%BASE_URL%favicon-32x32.png" sizes="32x32" type="image/png" />
+    <link rel="icon" href="%BASE_URL%favicon-48x48.png" sizes="48x48" type="image/png" />
+    <link rel="apple-touch-icon" href="%BASE_URL%apple-touch-icon-180x180.png" />
+  </head>
+  <body>
+    <main id="stage" class="stage" aria-label="PlatyJam stage"></main>
+    <div id="hud" class="hud">
+      <header class="brand">
+        <img
+          class="brand-mark"
+          src="%BASE_URL%brand-mark-108x108.png"
+          alt=""
+          width="36"
+          height="36"
+        />
+        <span class="brand-name">PlatyJam</span>
+      </header>
+      <div class="notices" data-hud="notices" aria-live="polite"></div>
+    </div>
+    <noscript><p class="noscript">PlatyJam needs JavaScript to play.</p></noscript>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

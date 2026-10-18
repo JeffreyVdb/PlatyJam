@@ -1,0 +1,9 @@
+{
+  // Solution file: each sub-project is typechecked on its own (see `npm run typecheck`).
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.sw.json" },
+    { "path": "./tsconfig.node.json" }
+  ]
+}
