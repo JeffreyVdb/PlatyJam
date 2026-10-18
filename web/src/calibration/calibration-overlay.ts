@@ -347,15 +347,22 @@ export function openCalibration({
     };
     const sound = el('div', 'calibration-row');
     const nudges = el('div', 'calibration-nudge');
-    const earlier = button(`−${NUDGE_MS} ms`, 'quiet', () => {
+    // A bigger sound delay schedules notes earlier: lower it when they come early.
+    const lower = button(`Lower by ${NUDGE_MS} ms`, 'quiet', () => {
       nudge(-NUDGE_MS);
     });
-    earlier.setAttribute('aria-label', `Sound delay minus ${NUDGE_MS} milliseconds`);
-    const later = button(`+${NUDGE_MS} ms`, 'quiet', () => {
+    lower.setAttribute(
+      'aria-label',
+      `Lower the sound delay by ${NUDGE_MS} milliseconds, for notes that sound early`,
+    );
+    const raise = button(`Raise by ${NUDGE_MS} ms`, 'quiet', () => {
       nudge(NUDGE_MS);
     });
-    later.setAttribute('aria-label', `Sound delay plus ${NUDGE_MS} milliseconds`);
-    nudges.append(earlier, later);
+    raise.setAttribute(
+      'aria-label',
+      `Raise the sound delay by ${NUDGE_MS} milliseconds, for notes that sound late`,
+    );
+    nudges.append(lower, raise);
     sound.append(el('dt', 'calibration-label', 'Sound delay'), soundValue, nudges);
     const touch = el('div', 'calibration-row');
     touch.append(el('dt', 'calibration-label', 'Touch delay'), touchValue);
@@ -374,7 +381,7 @@ export function openCalibration({
       el(
         'p',
         'calibration-aside',
-        'If notes still sound early or late while you play, nudge the sound delay: up if they come early, down if they come late.',
+        'If notes sound early while you play, lower the sound delay. If they sound late, raise it.',
       ),
       actions(
         save,
