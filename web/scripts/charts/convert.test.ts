@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { DIFFICULTIES, type Chart } from '../../src/chart/schema.ts';
 import { parseSongConfig, thresholdsFor, type SongConfig } from './config.ts';
@@ -171,6 +172,24 @@ describe('convertMidi difficulty density', () => {
   it('makes easy, normal and hard clearly different on the realistic piece', () => {
     const { chart, stats } = convert(realisticPiece());
     expectClearSteps(chart, stats);
+  });
+
+  it('makes easy, normal and hard clearly different on the sample song, as committed', async () => {
+    const dir = new URL('../../songs-src/andre-sonatine/', import.meta.url);
+    const song = parseSongConfig(JSON.parse(await readFile(new URL('song.json', dir), 'utf8')));
+    const { chart, stats } = convertMidi(
+      await readFile(new URL('andre-sonatine.mid', dir)),
+      song,
+      'andre-sonatine',
+    );
+    expectClearSteps(chart, stats);
+    expectLaneRules(chart, song);
+    // `pnpm charts` must reproduce the committed chart byte for byte.
+    const committed = await readFile(
+      new URL('../../public/songs/andre-sonatine.json', import.meta.url),
+      'utf8',
+    );
+    expect(committed).toBe(`${formatJson(chart)}\n`);
   });
 });
 
