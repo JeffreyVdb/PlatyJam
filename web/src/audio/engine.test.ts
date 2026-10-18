@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createLifecycle } from '../app/lifecycle';
-import { type AudioEngine, createAudioEngine } from './engine';
+import { type AudioEngine, createAudioEngine, SILENCE_FADE_MS } from './engine';
 
 type ResumeBehaviour = 'run' | 'reject' | 'hang' | 'stay-suspended' | 'frozen';
 
@@ -286,6 +286,17 @@ describe('createAudioEngine', () => {
       expect(engine.phase).toBe('interrupted');
       expect(engine.clock.isRunning).toBe(false);
       expect(events).not.toContain('resumed');
+    });
+  });
+
+  describe('silence', () => {
+    it('asks everything playing to fade out, with the given or a short default fade', () => {
+      const { engine } = create();
+      const fades: number[] = [];
+      engine.events.on('silenced', ({ fadeMs }) => fades.push(fadeMs));
+      engine.silence(80);
+      engine.silence();
+      expect(fades).toEqual([80, SILENCE_FADE_MS]);
     });
   });
 

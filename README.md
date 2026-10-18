@@ -123,6 +123,7 @@ Subscribe with `engine.events.on(type, handler)`:
 | `needsgesture` | That tap did not bring the sound back. Ask for one more tap; it recreates the context.                  |
 | `resumed`      | Audio runs again and the song clock continues. The accompaniment re-plans from the current song time.   |
 | `recreated`    | A new `AudioContext` replaced a stuck one. Nodes are gone; decoded `AudioBuffer`s are reused.           |
+| `silenced`     | `engine.silence()` was called (the calibration does on open): fade out every sound and forget the song. |
 
 ### Unlock and interruptions
 

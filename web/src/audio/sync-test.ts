@@ -106,13 +106,17 @@ export function createSyncTest(audio: GameAudio, nowMs = () => performance.now()
     backing?.play();
   });
 
-  const stop = () => {
+  const stop = (fadeMs = 150) => {
     running = false;
-    accompaniment.stopAll(150);
-    backing?.stop(150);
+    accompaniment.stopAll(fadeMs);
+    backing?.stop(fadeMs);
     backing = undefined;
     engine.clock.pause();
   };
+  // The calibration needs quiet: end the test, so the debug panel shows it stopped.
+  engine.events.on('silenced', ({ fadeMs }) => {
+    if (running) stop(fadeMs);
+  });
 
   return {
     start(options) {
@@ -136,7 +140,9 @@ export function createSyncTest(audio: GameAudio, nowMs = () => performance.now()
         backing.play();
       }
     },
-    stop,
+    stop() {
+      stop();
+    },
     readout() {
       const { clock, timeline } = engine;
       const songMs = timeline.songTime();

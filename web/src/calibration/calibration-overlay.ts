@@ -200,6 +200,8 @@ export function openCalibration({
   onSaved,
   onClose,
 }: CalibrationOptions): CalibrationHandle {
+  // Both rounds need quiet: no song, sync test or held piano note under them.
+  engine.silence();
   const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const sheet = el('section', 'calibration');
   sheet.setAttribute('role', 'dialog');
@@ -268,6 +270,7 @@ export function openCalibration({
 
   const beginRound = async (round: Round) => {
     if (round === 'see') seen = undefined;
+    engine.silence();
     const copy = ROUND_COPY[round];
     const view = el('div', 'calibration-run');
     view.dataset.round = round;

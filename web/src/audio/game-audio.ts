@@ -49,6 +49,10 @@ export function createGameAudio({ bus, base }: GameAudioOptions): GameAudio {
   engine.events.on('resumed', () => {
     accompaniment.resume();
   });
+  // Reaches the piano too (tap-pad voices included): it is the accompaniment's instrument.
+  engine.events.on('silenced', ({ fadeMs }) => {
+    accompaniment.stopAll(fadeMs);
+  });
 
   const progress: LoadProgress = { loaded: 0, failed: 0, total: 88 };
   const ready = loadPianoSamples({

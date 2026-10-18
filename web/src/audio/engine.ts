@@ -10,6 +10,8 @@ import { createTimeline, type LatencyOffsets, type Timeline, ZERO_OFFSETS } from
 export const INTERRUPT_FADE_MS = 30;
 /** Silent recovery on return: suspend, wait this long, resume (WebKit 281566). */
 export const RECOVERY_DELAY_MS = 200;
+/** Fade for `silence()` when the caller gives none. */
+export const SILENCE_FADE_MS = 50;
 /** A resume() that has not settled by then is treated as stuck. */
 export const RESUME_TIMEOUT_MS = 300;
 /** After resuming, `currentTime` must move within this window (WebKit 263627). */
@@ -45,6 +47,11 @@ export interface AudioEngineEvents {
    * AudioBuffers still work); `context` and `output` already point at the new ones.
    */
   recreated: { context: AudioContext; count: number };
+  /**
+   * Something needs quiet (the calibration): fade out every sound and forget the
+   * song, as on quit. Whoever plays audio on the engine subscribes.
+   */
+  silenced: { fadeMs: number };
 }
 
 export interface AudioEngineDebugState {
@@ -88,6 +95,8 @@ export interface AudioEngine {
    * context there (or recreates it when it is known to be stuck), then the clock.
    */
   resumeFromGesture(): void;
+  /** Stops everything playing on the engine, with a short fade (emits `silenced`). */
+  silence(fadeMs?: number): void;
   /** Debug: interrupts as backgrounding would. `stuck` makes the next tap recreate. */
   simulateInterruption(options?: { stuck?: boolean }): void;
   debugState(): AudioEngineDebugState;
@@ -336,6 +345,10 @@ export function createAudioEngine({
         clock.resume();
         events.emit('resumed', { recreated });
       });
+    },
+
+    silence(fadeMs = SILENCE_FADE_MS) {
+      events.emit('silenced', { fadeMs });
     },
 
     simulateInterruption({ stuck = false } = {}) {
