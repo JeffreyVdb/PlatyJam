@@ -71,7 +71,8 @@ function mediaStrategy(cacheName: MediaCacheName, maxEntries: number): CacheFirs
 
 const strategies: Record<MediaCacheName, CacheFirst> = {
   [SONGS_CACHE]: mediaStrategy(SONGS_CACHE, 200),
-  [SOUNDFONTS_CACHE]: mediaStrategy(SOUNDFONTS_CACHE, 40),
+  // The piano alone is 88 files (one MP3 per key); leave room for more instruments.
+  [SOUNDFONTS_CACHE]: mediaStrategy(SOUNDFONTS_CACHE, 400),
 };
 
 registerRoute(
