@@ -12,7 +12,8 @@ export interface Hud {
   showNotice(message: string, durationMs?: number): void;
   /** Shows a notice that stays, with one recovery action. */
   showProblem(message: string, actionLabel: string, action: () => void): void;
-  showDebugPanel(hook: DebugHook): void;
+  /** `sections` are appended below the render controls (the Audio tools). */
+  showDebugPanel(hook: DebugHook, sections?: readonly HTMLElement[]): void;
 }
 
 const NOTICE_MS = 5000;
@@ -83,7 +84,7 @@ export function createHud(root: HTMLElement): Hud {
       notices.append(problem);
     },
 
-    showDebugPanel(hook) {
+    showDebugPanel(hook, sections = []) {
       const panel = element('section', 'debug-panel');
       panel.setAttribute('aria-label', 'Debug tools');
       const status = element('p', 'debug-status');
@@ -97,7 +98,7 @@ export function createHud(root: HTMLElement): Hud {
           hook.restoreContext();
         }),
       );
-      panel.append(status, actions);
+      panel.append(status, actions, ...sections);
       root.append(panel);
 
       const refresh = () => {
