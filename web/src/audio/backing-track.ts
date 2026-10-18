@@ -43,6 +43,43 @@ export function planBackingStart({
   return offset < durationSec ? { when: earliest, offset } : null;
 }
 
+/** `url` as given when it is absolute (`/…`, `https:`, `blob:`), otherwise under the app `base`. */
+export function backingTrackUrl(base: string, url: string): string {
+  return url.startsWith('/') || /^[a-z][a-z\d+.-]*:/i.test(url) ? url : `${base}${url}`;
+}
+
+export interface BackingLoadOptions {
+  /** The audio file: absolute, or relative to `base`. */
+  url: string;
+  /** App base URL (`import.meta.env.BASE_URL`), ending in a slash. */
+  base: string;
+  /** `fetch` rather than `<audio>`, as for the piano: the service worker caches whole responses. */
+  fetch?: (url: string) => Promise<Response>;
+  /** Decodes into the current context. Works while the context is still suspended. */
+  decode: (data: ArrayBuffer) => Promise<AudioBuffer>;
+}
+
+/**
+ * Loads a backing file for `createBackingTrack`. Never rejects: on a network or
+ * decode failure it logs and resolves null, and the song plays without it.
+ */
+export async function loadBackingTrack({
+  url,
+  base,
+  fetch = (input) => window.fetch(input),
+  decode,
+}: BackingLoadOptions): Promise<AudioBuffer | null> {
+  const resolved = backingTrackUrl(base, url);
+  try {
+    const response = await fetch(resolved);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await decode(await response.arrayBuffer());
+  } catch (error) {
+    console.warn(`[platyjam] backing track ${resolved} did not load`, error);
+    return null;
+  }
+}
+
 export interface BackingTrack {
   /** Starts (or restarts) the file in sync with the running clock. */
   play(): void;

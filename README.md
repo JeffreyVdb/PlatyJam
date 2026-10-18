@@ -80,18 +80,18 @@ Wrap storage writes in the guard from `createStorageGuard()` (`src/app/storage.t
 
 Everything under `web/src/audio/`. The pure maths has no Web Audio imports and is unit-tested; only `engine.ts`, `sampler.ts`, `click.ts` and `backing-track.ts` touch Web Audio objects.
 
-| Module             | What it does                                                                                                   |
-| ------------------ | -------------------------------------------------------------------------------------------------------------- |
-| `engine.ts`        | Owns the one `AudioContext` and master gain: unlock, `audioSession`, interruptions, recreation, the song clock |
-| `clock.ts`         | The song clock: context time to song time, with start offset, pause, resume and tempo                          |
-| `output-time.ts`   | Maps a `performance.now()` time (an `event.timeStamp`) to context time with `getOutputTimestamp()`             |
-| `timeline.ts`      | The clock plus calibrated offsets: `songTime()`, `judgeSongTime()`, `startTimeFor()`                           |
-| `sampler.ts`       | Piano voices: `noteOn` / `noteOff`, velocity curve, release envelope, 48-voice cap                             |
-| `piano-samples.ts` | Loads the 88 FluidR3 MP3s with `fetch` and `decodeAudioData`, six at a time                                    |
-| `scheduler.ts`     | Look-ahead accompaniment (25 ms tick, 100 ms horizon) and the `AccompanimentNote` type charts use              |
-| `backing-track.ts` | An optional audio file started in sync with the clock                                                          |
-| `calibration*.ts`  | Calibration statistics, and saving the offsets                                                                 |
-| `game-audio.ts`    | Wires engine, piano and accompaniment together; `main.ts` calls it                                             |
+| Module             | What it does                                                                                                                 |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `engine.ts`        | Owns the one `AudioContext` and master gain: unlock, `audioSession`, interruptions, recreation, the song clock               |
+| `clock.ts`         | The song clock: context time to song time, with start offset, pause, resume and tempo                                        |
+| `output-time.ts`   | Maps a `performance.now()` time (an `event.timeStamp`) to context time with `getOutputTimestamp()`                           |
+| `timeline.ts`      | The clock plus calibrated offsets: `songTime()`, `judgeSongTime()`, `startTimeFor()`                                         |
+| `sampler.ts`       | Piano voices: `noteOn` / `noteOff`, velocity curve, release envelope, 48-voice cap                                           |
+| `piano-samples.ts` | Loads the 88 FluidR3 MP3s with `fetch` and `decodeAudioData`, six at a time                                                  |
+| `scheduler.ts`     | Look-ahead accompaniment (25 ms tick, 100 ms horizon) and the `AccompanimentNote` type charts use                            |
+| `backing-track.ts` | An optional audio file: `loadBackingTrack()` fetches and decodes it, `createBackingTrack()` starts it in sync with the clock |
+| `calibration*.ts`  | Calibration statistics, and saving the offsets                                                                               |
+| `game-audio.ts`    | Wires engine, piano and accompaniment together; `main.ts` calls it                                                           |
 
 ### Time model
 

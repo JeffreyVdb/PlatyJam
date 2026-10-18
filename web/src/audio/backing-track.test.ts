@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { planBackingStart } from './backing-track';
+import { describe, expect, it, vi } from 'vitest';
+import { backingTrackUrl, loadBackingTrack, planBackingStart } from './backing-track';
 import { createSongClock } from './clock';
 
 function clockAt({ tempo = 1, ctx = 0, songMs = 0 } = {}) {
@@ -58,4 +58,62 @@ describe('planBackingStart', () => {
     const clock = clockAt({ songMs: 61_000 });
     expect(planBackingStart({ ...base, clock, now: 0 })).toBeNull();
   });
+});
+
+describe('backingTrackUrl', () => {
+  it('puts a relative path under the app base', () => {
+    expect(backingTrackUrl('/PlatyJam/', 'songs/intro.mp3')).toBe('/PlatyJam/songs/intro.mp3');
+  });
+
+  it('leaves root-relative and absolute URLs alone', () => {
+    expect(backingTrackUrl('/PlatyJam/', '/media/intro.mp3')).toBe('/media/intro.mp3');
+    expect(backingTrackUrl('/PlatyJam/', 'https://example.org/a.mp3')).toBe(
+      'https://example.org/a.mp3',
+    );
+    expect(backingTrackUrl('/PlatyJam/', 'blob:abc')).toBe('blob:abc');
+  });
+});
+
+describe('loadBackingTrack', () => {
+  const decoded = { duration: 60 } as AudioBuffer;
+  const bytes = new ArrayBuffer(8);
+  const ok = () => Promise.resolve(new Response(bytes));
+
+  it('fetches the file under the app base and decodes it', async () => {
+    const fetch = vi.fn(ok);
+    const decode = vi.fn(() => Promise.resolve(decoded));
+    const buffer = await loadBackingTrack({
+      url: 'songs/a.mp3',
+      base: '/PlatyJam/',
+      fetch,
+      decode,
+    });
+    expect(buffer).toBe(decoded);
+    expect(fetch).toHaveBeenCalledWith('/PlatyJam/songs/a.mp3');
+    expect(decode).toHaveBeenCalledWith(expect.any(ArrayBuffer));
+  });
+
+  it.each([
+    ['an HTTP error', () => Promise.resolve(new Response('', { status: 404 })), () => decoded],
+    ['no network', () => Promise.reject(new TypeError('offline')), () => decoded],
+    [
+      'a file that does not decode',
+      ok,
+      () => Promise.reject(new DOMException('bad', 'EncodingError')),
+    ],
+  ] as const)(
+    'resolves null on %s, so the song plays without it',
+    async (_label, fetch, decode) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const buffer = await loadBackingTrack({
+        url: 'songs/a.mp3',
+        base: '/',
+        fetch,
+        decode: () => Promise.resolve().then(decode),
+      });
+      expect(buffer).toBeNull();
+      expect(warn).toHaveBeenCalledOnce();
+      warn.mockRestore();
+    },
+  );
 });
