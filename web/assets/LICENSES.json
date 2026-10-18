@@ -12,7 +12,7 @@
       "license": "Public Domain",
       "licenseUrl": "https://www.mutopiaproject.org/legal.html#publicdomain",
       "nonCommercial": false,
-      "modifications": "None: andre-sonatine.mid is the unmodified MIDI file from the source. PlatyJam's converter charts it into public/songs/andre-sonatine.json.",
+      "modifications": "MIDI unmodified; charted with the PlatyJam converter.",
       "retrieved": "2026-10-18",
       "paths": ["songs-src/andre-sonatine/", "public/songs/andre-sonatine.json"]
     },
@@ -27,7 +27,7 @@
       "license": "Public Domain",
       "licenseUrl": "https://www.mutopiaproject.org/legal.html#publicdomain",
       "nonCommercial": false,
-      "modifications": "None: fur_Elise_WoO59.mid is the unmodified MIDI file from the source. PlatyJam's converter charts it into public/songs/beethoven-fur-elise.json.",
+      "modifications": "MIDI unmodified; charted with the PlatyJam converter.",
       "retrieved": "2026-10-18",
       "paths": ["songs-src/beethoven-fur-elise/", "public/songs/beethoven-fur-elise.json"]
     },
@@ -42,7 +42,7 @@
       "license": "Public Domain",
       "licenseUrl": "https://www.mutopiaproject.org/legal.html#publicdomain",
       "nonCommercial": false,
-      "modifications": "None: pathetique-3.mid is the unmodified MIDI file from the source. PlatyJam's converter charts it into public/songs/beethoven-pathetique-rondo.json.",
+      "modifications": "MIDI unmodified; charted with the PlatyJam converter.",
       "retrieved": "2026-10-18",
       "paths": [
         "songs-src/beethoven-pathetique-rondo/",
@@ -60,7 +60,7 @@
       "license": "CC0 1.0",
       "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
       "nonCommercial": false,
-      "modifications": "Original work: the PlatyJam song generator wrote billabong-morning.mid from generate.json. PlatyJam's converter charts it into public/songs/billabong-morning.json.",
+      "modifications": "Original work, made with the PlatyJam song generator; charted with the PlatyJam converter.",
       "retrieved": "2026-10-18",
       "paths": ["songs-src/billabong-morning/", "public/songs/billabong-morning.json"]
     },
@@ -75,7 +75,7 @@
       "license": "Public Domain",
       "licenseUrl": "https://www.mutopiaproject.org/legal.html#publicdomain",
       "nonCommercial": false,
-      "modifications": "None: gymnopedie_1.mid is the unmodified MIDI file from the source. PlatyJam's converter charts it into public/songs/satie-gymnopedie-1.json.",
+      "modifications": "MIDI unmodified; charted with the PlatyJam converter.",
       "retrieved": "2026-10-18",
       "paths": ["songs-src/satie-gymnopedie-1/", "public/songs/satie-gymnopedie-1.json"]
     },
@@ -88,7 +88,7 @@
       "license": "CC BY 3.0 US",
       "licenseUrl": "https://creativecommons.org/licenses/by/3.0/us/",
       "nonCommercial": false,
-      "modifications": "None: the 88 MP3 files are byte-identical to FluidR3_GM/acoustic_grand_piano-mp3/ on the gh-pages branch.",
+      "modifications": "Unmodified: the 88 MP3 files from FluidR3_GM/acoustic_grand_piano-mp3/ on the gh-pages branch.",
       "retrieved": "2026-10-18",
       "paths": ["public/soundfonts/fluidr3-gm/"]
     },
@@ -101,7 +101,7 @@
       "license": "OFL-1.1",
       "licenseUrl": "https://openfontlicense.org/open-font-license-official-text/",
       "nonCommercial": false,
-      "modifications": "None: the variable-weight Latin subset as packaged by @fontsource-variable/shantell-sans 5.3.0.",
+      "modifications": "Unmodified: the variable-weight Latin subset from @fontsource-variable/shantell-sans 5.3.0.",
       "retrieved": "2026-10-18",
       "paths": [
         "node_modules/@fontsource-variable/shantell-sans/files/shantell-sans-latin-wght-normal.woff2"
