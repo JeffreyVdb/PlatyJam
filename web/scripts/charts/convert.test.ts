@@ -2,11 +2,20 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { DIFFICULTIES, type Chart } from '../../src/chart/schema.ts';
-import { parseSongConfig, thresholdsFor, type SongConfig } from './config.ts';
-import { convertMidi } from './convert.ts';
+import { clusterNotes, compareNotes } from './clusters.ts';
+import { DEFAULT_THRESHOLDS, parseSongConfig, thresholdsFor, type SongConfig } from './config.ts';
+import { buildDifficulty, convertMidi } from './convert.ts';
+import { placeTiles } from './lanes.ts';
 import { laneRuleIssues } from './rules.ts';
 import { formatJson } from './serialize.ts';
-import { midiBytes, realisticPiece, type FixtureNote, type FixtureTrack } from './test-midi.ts';
+import {
+  midiBytes,
+  realisticPiece,
+  seededRandom,
+  type FixtureNote,
+  type FixtureTrack,
+} from './test-midi.ts';
+import type { TimedNote } from './timing.ts';
 
 const baseConfig = {
   title: 'Fixture',
@@ -138,6 +147,43 @@ describe('convertMidi lane rules', () => {
     expect(chart.difficulties.hard.tiles.map((t) => t.pitches)).toEqual([[60], [72]]);
     expect(chart.difficulties.hard.accompaniment?.map((n) => n.pitch)).toEqual([64, 67]);
     expect(chart.difficulties.easy.tiles.map((t) => t.pitches)).toEqual([[72]]);
+  });
+});
+
+describe('hard is the full melody', () => {
+  it('turns a placeable run of 32nd notes into one tile per note', () => {
+    const run = [60, 62, 64, 65].map((pitch, i) => ({ beat: i / 8, len: 1 / 16, pitch }));
+    const { hard } = convert(melody(run)).chart.difficulties;
+    expect(hard.tiles.map(({ t, lane, pitches }) => [t, lane, pitches])).toEqual([
+      [0, 0, [60]],
+      [63, 1, [62]],
+      [125, 2, [64]],
+      [188, 3, [65]],
+    ]);
+    expect(hard.accompaniment).toBeUndefined();
+  });
+
+  it('only leaves out the notes lane placement cannot fit', () => {
+    // Dense random chords every 31–90 ms: closer than any thinning interval.
+    const random = seededRandom(11);
+    const notes: TimedNote[] = [];
+    for (let t = 0; t < 8000; t += 31 + Math.floor(random() * 60)) {
+      const size = 1 + Math.floor(random() * 3);
+      for (let k = 0; k < size; k++) {
+        const dur = random() < 0.2 ? 1000 : 60;
+        notes.push({ t, dur, pitch: 48 + Math.floor(random() * 36), vel: 80, tick: t });
+      }
+    }
+    const clusters = clusterNotes(notes, 30, () => 'any');
+    const pitchRange = { low: 48, high: 83 };
+    const { tiles, leftover } = placeTiles(clusters, { ...DEFAULT_THRESHOLDS.hard, pitchRange });
+    const accompaniment = [...leftover]
+      .sort(compareNotes)
+      .map(({ t, pitch, dur, vel }) => ({ t, pitch, dur, vel }));
+    expect(buildDifficulty(clusters, DEFAULT_THRESHOLDS.hard, pitchRange)).toEqual({
+      tiles,
+      accompaniment,
+    });
   });
 });
 

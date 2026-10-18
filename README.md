@@ -185,7 +185,7 @@ All times are integer ms of chart time (the song at 1×), measured from `t = 0`,
 1. **Split** (`extract.ts`): the melody tracks (see `melody` below) become tiles; every other note is accompaniment. Drum tracks (channel 10) are dropped.
 2. **Time** (`timing.ts`): onsets and ends within a quarter of a grid step (default a sixteenth note) snap to the grid; the rest, triplets for example, stay put. Ticks become ms through the file's tempo map, and everything shifts so the first note is at 0.
 3. **Chords** (`clusters.ts`): melody onsets within 30 ms are one chord. Each chord gets a metric strength from its tick and the time signatures: downbeat, strong beat (beat 3 in 4/4, beat 2 in 2/2 and 2/4, beat 4 in 6/8), beat, half beat, quarter beat, or none.
-4. **Thin** (per difficulty): chords weaker than `minStrength` are dropped. Where two onsets are closer than `minIntervalMs`, the stronger (then the earlier) one stays.
+4. **Thin** (per difficulty): chords weaker than `minStrength` are dropped. Where two onsets are closer than `minIntervalMs`, the stronger (then the earlier) one stays. Hard's default `minIntervalMs` is 0, so it keeps every chord.
 5. **Place** (`lanes.ts`): the highest note of a chord is the tile. The lowest of the others makes a double when `doubles` allows it, on the left of the higher note; the rest of the chord goes to the difficulty's accompaniment. Notes at least `holdMinMs` long become holds. Lanes follow the pitch contour: higher moves right, lower moves left, a repeated pitch stays in its lane, and leaps move two or three lanes. At an edge the motion bounces back and keeps that way until the melody turns. A lane is free `minLaneGapMs` after its previous tile ends. A hold that is in the way, or that would make a third active tile, is trimmed to end `minLaneGapMs` before the new tile, and becomes a tap if that leaves less than half of `holdMinMs`. If no lane fits, the double is dropped, then the note goes to the accompaniment: a rule is never broken.
 6. **Check**: the chart is validated with the shared schema and the lane rules, including the lane gap and the pitch order of doubles. Nothing is written for a song that fails, and the command exits non-zero.
 
@@ -194,12 +194,12 @@ The thresholds per difficulty, with their defaults:
 | Threshold       | Easy     | Normal   | Hard  | Meaning                                                                              |
 | --------------- | -------- | -------- | ----- | ------------------------------------------------------------------------------------ |
 | `minStrength`   | `strong` | `any`    | `any` | Weakest onset kept: `downbeat`, `strong`, `beat`, `half-beat`, `quarter-beat`, `any` |
-| `minIntervalMs` | 450      | 280      | 100   | Minimum time between kept onsets                                                     |
+| `minIntervalMs` | 450      | 280      | 0     | Minimum time between kept onsets                                                     |
 | `doubles`       | `none`   | `strong` | `all` | Which chords become doubles: `all`, `beats`, `strong`, `none`                        |
 | `holdMinMs`     | 500      | 700      | 800   | Notes at least this long are holds                                                   |
 | `minLaneGapMs`  | 250      | 150      | 100   | Minimum time from a tile's end to the next tile in its lane                          |
 
-So Hard plays the whole melody (at most two notes per chord), Normal drops fast runs and ornaments and keeps doubles for strong beats, and Easy plays strong beats only, without doubles and with more holds. `pnpm charts` prints tiles, holds, doubles and notes per second for each difficulty. For the sample song:
+So Hard plays the whole melody (at most two notes per chord; a note goes to the accompaniment only where no lane fits it), Normal drops fast runs and ornaments and keeps doubles for strong beats, and Easy plays strong beats only, without doubles and with more holds. `pnpm charts` prints tiles, holds, doubles and notes per second for each difficulty. For the sample song:
 
 ```
 andre-sonatine: andre-sonatine.mid → public/songs/andre-sonatine.json (95.8 s)

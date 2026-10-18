@@ -24,6 +24,7 @@ export const ThresholdsSchema = z.strictObject({
   /**
    * Minimum time between two kept onsets, ms. Where onsets are closer, the stronger
    * one (then the earlier one) is kept and the other goes to the accompaniment.
+   * 0 keeps every onset: Hard's default, so only the lane rules leave notes out.
    */
   minIntervalMs: z.int().min(0),
   /** Which chords become doubles: all, those on a beat, those on a strong beat, or none. */
@@ -52,7 +53,7 @@ export const DEFAULT_THRESHOLDS: Record<DifficultyName, Thresholds> = {
   },
   hard: {
     minStrength: 'any',
-    minIntervalMs: 100,
+    minIntervalMs: 0,
     doubles: 'all',
     holdMinMs: 800,
     minLaneGapMs: 100,
