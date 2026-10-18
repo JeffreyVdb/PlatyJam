@@ -1,0 +1,266 @@
+/* Shantell Sans, latin subset only: one woff2 in the precache instead of six. */
+@font-face {
+  font-family: 'Shantell Sans';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 800;
+  src: url('@fontsource-variable/shantell-sans/files/shantell-sans-latin-wght-normal.woff2')
+    format('woff2-variations');
+}
+
+:root {
+  /* Billabong at dusk. Keep in sync with vite.config.ts and the scene palette. */
+  --river-deep: #0d2b3e;
+  --river: #164560;
+  --river-raised: #1d5574;
+  /* The app icon's yellow. */
+  --bill: #feb102;
+  --bill-pressed: #e09a00;
+  --ripple: #6fe3cf;
+  --foam: #f3f7ee;
+  --foam-soft: #c9dbd6;
+
+  --font: 'Shantell Sans', ui-rounded, 'SF Pro Rounded', system-ui, sans-serif;
+  --edge: 16px;
+  --radius-card: 18px;
+  --radius-control: 12px;
+  --shadow-card: 0 10px 28px rgb(3 14 22 / 45%), 0 2px 6px rgb(3 14 22 / 30%);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  color-scheme: dark;
+}
+
+/* The page is a fixed, unscrollable game surface (iPadOS rubber-banding included). */
+html,
+body {
+  position: fixed;
+  inset: 0;
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: var(--river-deep);
+  color: var(--foam);
+  font-family: var(--font);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+::selection {
+  background: var(--ripple);
+  color: var(--river-deep);
+}
+
+/* Full-bleed play surface; the canvas fills it and CSS owns its size. */
+.stage {
+  position: fixed;
+  inset: 0;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.stage-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  outline: none;
+}
+
+/* HUD: above the stage, inset from notches, rounded corners and the status bar. */
+.hud {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--edge);
+  padding: calc(env(safe-area-inset-top) + var(--edge))
+    calc(env(safe-area-inset-right) + var(--edge)) calc(env(safe-area-inset-bottom) + var(--edge))
+    calc(env(safe-area-inset-left) + var(--edge));
+  pointer-events: none;
+}
+
+.hud > * {
+  pointer-events: auto;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+.brand-mark {
+  display: block;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgb(3 14 22 / 40%);
+}
+
+.brand-name {
+  font-size: 1.375rem;
+  font-weight: 720;
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+
+.notices {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  min-width: 0;
+  max-width: min(24rem, 100%);
+}
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 12px 12px 18px;
+  border-radius: var(--radius-card);
+  background: var(--river);
+  box-shadow: var(--shadow-card);
+  animation: notice-in 420ms var(--ease-out) both;
+}
+
+.notice--brief {
+  padding-right: 18px;
+}
+
+.notice--problem {
+  background: var(--river-raised);
+  outline: 2px solid var(--bill);
+  outline-offset: -2px;
+}
+
+.notice.is-leaving {
+  animation: notice-out 260ms ease-in both;
+}
+
+.notice-text {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 450;
+  line-height: 1.35;
+  color: var(--foam);
+}
+
+@keyframes notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.98);
+    filter: blur(4px);
+  }
+}
+
+@keyframes notice-out {
+  to {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+.hud-button {
+  flex: none;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: var(--radius-control);
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 650;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition:
+    background-color 120ms ease-out,
+    transform 120ms ease-out;
+}
+
+.hud-button--primary {
+  background: var(--bill);
+  color: var(--river-deep);
+}
+
+.hud-button--primary:hover {
+  background: #ffc12e;
+}
+
+.hud-button--primary:active {
+  background: var(--bill-pressed);
+  transform: translateY(1px);
+}
+
+.hud-button--quiet {
+  background: transparent;
+  color: var(--ripple);
+  box-shadow: inset 0 0 0 1.5px currentcolor;
+}
+
+.hud-button--quiet:active {
+  background: rgb(111 227 207 / 14%);
+}
+
+.hud-button:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.hud-button:focus-visible {
+  outline: 3px solid var(--ripple);
+  outline-offset: 3px;
+}
+
+/* ?debug only: context-loss controls for testing on a device. */
+.debug-panel {
+  position: absolute;
+  left: calc(env(safe-area-inset-left) + var(--edge));
+  bottom: calc(env(safe-area-inset-bottom) + var(--edge));
+  max-width: min(30rem, calc(100% - 2 * var(--edge)));
+  padding: 12px 14px;
+  border-radius: var(--radius-card);
+  background: rgb(13 43 62 / 88%);
+  box-shadow: var(--shadow-card);
+}
+
+.debug-status {
+  margin: 0 0 10px;
+  font-size: 0.875rem;
+  line-height: 1.35;
+  color: var(--foam-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.debug-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.noscript {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: var(--edge);
+  font-size: 1.125rem;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notice,
+  .notice.is-leaving {
+    animation: none;
+  }
+}
