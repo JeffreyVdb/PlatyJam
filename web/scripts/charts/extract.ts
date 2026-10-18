@@ -85,7 +85,12 @@ export function splitMelody(
   });
 
   if (result.melody.length === 0) {
-    throw new Error(`The melody selection ${JSON.stringify(select)} matches no notes`);
+    const tracks = result.tracks.map(
+      (t) => `\n  track ${t.index} "${t.name}" channel ${t.channel}: ${t.notes} notes`,
+    );
+    throw new Error(
+      `The melody selection ${JSON.stringify(select)} matches no notes. Tracks:${tracks.join('')}`,
+    );
   }
   return result;
 }

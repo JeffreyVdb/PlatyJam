@@ -225,7 +225,7 @@ andre-sonatine: andre-sonatine.mid → public/songs/andre-sonatine.json (95.8 s)
    | `mergeWindowMs`     | `30`                           | Melody onsets this close are one chord                                                                                                                  |
    | `difficulties`      | `{}`                           | Per difficulty (`easy`, `normal`, `hard`), any threshold from the table above                                                                           |
 
-   Unknown fields are errors, so a typo does not go unnoticed. Run `pnpm charts <id>` once: it lists the file's tracks (index, name, channel, notes) so you can pick the melody.
+   Unknown fields are errors, so a typo does not go unnoticed. Run `pnpm charts <id>` once: it lists the file's tracks (index, name, channel, notes) so you can pick the melody, also when the selection matches nothing.
 
 4. **Build:** `pnpm charts` rebuilds every song (`pnpm charts <id>` only that one). Check the notes per second it prints: each difficulty should be clearly easier than the next. Tune `difficulties` in `song.json` if not.
 5. **Credit it:** add a line to [Credits](#credits) and commit the source directory and the generated `public/songs/<id>.json` together.
