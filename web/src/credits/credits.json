@@ -1,0 +1,100 @@
+{
+  "$comment": "Generated from assets/LICENSES.json by `pnpm credits`. Do not edit: change the manifest and run it again.",
+  "sections": [
+    {
+      "kind": "songs",
+      "title": "Songs",
+      "items": [
+        {
+          "id": "andre-sonatine",
+          "title": "Sonatine, Op. 34: I. Moderato ma con moto",
+          "byline": "J. André (1741–1799) · Bas Wassink, typeset for the Mutopia Project",
+          "license": {
+            "label": "Public domain",
+            "url": "https://www.mutopiaproject.org/legal.html#publicdomain"
+          },
+          "source": "https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=207",
+          "changes": "MIDI unmodified; charted with the PlatyJam converter."
+        },
+        {
+          "id": "beethoven-fur-elise",
+          "title": "Für Elise, WoO 59",
+          "byline": "L. van Beethoven (1770–1827) · Stelios Samelis, typeset for the Mutopia Project",
+          "license": {
+            "label": "Public domain",
+            "url": "https://www.mutopiaproject.org/legal.html#publicdomain"
+          },
+          "source": "https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=931",
+          "changes": "MIDI unmodified; charted with the PlatyJam converter."
+        },
+        {
+          "id": "beethoven-pathetique-rondo",
+          "title": "Piano Sonata No. 8 \"Pathétique\", Op. 13: III. Rondo",
+          "byline": "L. van Beethoven (1770–1827) · Chris Sawer, typeset for the Mutopia Project",
+          "license": {
+            "label": "Public domain",
+            "url": "https://www.mutopiaproject.org/legal.html#publicdomain"
+          },
+          "source": "https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=296",
+          "changes": "MIDI unmodified; charted with the PlatyJam converter."
+        },
+        {
+          "id": "billabong-morning",
+          "title": "Billabong Morning",
+          "byline": "PlatyJam song generator (seed 95) · PlatyJam contributors",
+          "license": {
+            "label": "CC0 1.0",
+            "url": "https://creativecommons.org/publicdomain/zero/1.0/"
+          },
+          "source": "https://github.com/JeffreyVdb/PlatyJam/tree/main/web/songs-src/billabong-morning",
+          "changes": "Original work, made with the PlatyJam song generator; charted with the PlatyJam converter."
+        },
+        {
+          "id": "satie-gymnopedie-1",
+          "title": "Gymnopédie No. 1",
+          "byline": "E. Satie (1866–1925) · Evin Robertson, typeset for the Mutopia Project",
+          "license": {
+            "label": "Public domain",
+            "url": "https://www.mutopiaproject.org/legal.html#publicdomain"
+          },
+          "source": "https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=37",
+          "changes": "MIDI unmodified; charted with the PlatyJam converter."
+        }
+      ]
+    },
+    {
+      "kind": "sounds",
+      "title": "Sounds",
+      "items": [
+        {
+          "id": "fluidr3-gm-acoustic-grand-piano",
+          "title": "Acoustic grand piano samples (FluidR3_GM)",
+          "byline": "Frank Wen and contributors; MP3 conversion by Benjamin Gleitzman",
+          "license": {
+            "label": "CC BY 3.0 US",
+            "url": "https://creativecommons.org/licenses/by/3.0/us/"
+          },
+          "source": "https://github.com/gleitz/midi-js-soundfonts",
+          "changes": "Unmodified: the 88 MP3 files from FluidR3_GM/acoustic_grand_piano-mp3/ on the gh-pages branch."
+        }
+      ]
+    },
+    {
+      "kind": "fonts",
+      "title": "Fonts",
+      "items": [
+        {
+          "id": "shantell-sans",
+          "title": "Shantell Sans",
+          "byline": "The Shantell Sans Project Authors",
+          "license": {
+            "label": "SIL Open Font License 1.1",
+            "url": "https://openfontlicense.org/open-font-license-official-text/"
+          },
+          "source": "https://github.com/arrowtype/shantell-sans",
+          "changes": "Unmodified: the variable-weight Latin subset from @fontsource-variable/shantell-sans 5.3.0."
+        }
+      ]
+    }
+  ]
+}

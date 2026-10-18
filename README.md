@@ -17,7 +17,7 @@ PlatyJam is a musical rhythm game planned for the browser. Follow the beat, hit 
 
 ## Status
 
-`web/` holds the app shell: an offline-capable PWA with a placeholder stage (tiles falling down four lanes), the audio engine (game clock, piano sampler, accompaniment scheduler and latency calibration), and the chart format with a MIDI-to-chart converter and one sample song. Gameplay comes next.
+`web/` holds the app shell: an offline-capable PWA with a placeholder stage (tiles falling down four lanes), the audio engine (game clock, piano sampler, accompaniment scheduler and latency calibration), the chart format with a MIDI-to-chart converter, a starter pack of five songs (one of them generated), and a licence manifest that the credits data is generated from. Gameplay comes next.
 
 ## Web app (`web/`)
 
@@ -32,18 +32,20 @@ PlatyJam is a musical rhythm game planned for the browser. Follow the beat, hit 
 
 Run these in `web/`:
 
-| Command          | What it does                                                    |
-| ---------------- | --------------------------------------------------------------- |
-| `pnpm install`   | Install dependencies (CI uses `pnpm install --frozen-lockfile`) |
-| `pnpm dev`       | Dev server at http://127.0.0.1:44663/ (service worker off)      |
-| `pnpm build`     | Typecheck, then build to `web/dist/` with base `/PlatyJam/`     |
-| `pnpm preview`   | Serve `dist/` at http://127.0.0.1:36787/PlatyJam/ (with the SW) |
-| `pnpm test`      | Unit tests (Vitest, jsdom)                                      |
-| `pnpm lint`      | ESLint (type-checked rules) and Prettier check                  |
-| `pnpm format`    | Prettier write, then ESLint autofix                             |
-| `pnpm typecheck` | `tsc` for the app, service worker, config and scripts projects  |
-| `pnpm icons`     | Regenerate the app icons from `web/assets-src/`                 |
-| `pnpm charts`    | Rebuild every song chart (see [Charts](#charts))                |
+| Command              | What it does                                                                            |
+| -------------------- | --------------------------------------------------------------------------------------- |
+| `pnpm install`       | Install dependencies (CI uses `pnpm install --frozen-lockfile`)                         |
+| `pnpm dev`           | Dev server at http://127.0.0.1:44663/ (service worker off)                              |
+| `pnpm build`         | Typecheck, then build to `web/dist/` with base `/PlatyJam/`                             |
+| `pnpm preview`       | Serve `dist/` at http://127.0.0.1:36787/PlatyJam/ (with the SW)                         |
+| `pnpm test`          | Unit tests (Vitest, jsdom)                                                              |
+| `pnpm lint`          | ESLint (type-checked rules) and Prettier check                                          |
+| `pnpm format`        | Prettier write, then ESLint autofix                                                     |
+| `pnpm typecheck`     | `tsc` for the app, service worker, config and scripts projects                          |
+| `pnpm icons`         | Regenerate the app icons from `web/assets-src/`                                         |
+| `pnpm charts`        | Rebuild every song chart (see [Charts](#charts))                                        |
+| `pnpm generate-song` | Rewrite the MIDI of each generated song (see [The song generator](#the-song-generator)) |
+| `pnpm credits`       | Regenerate the credits data from the licence manifest (see [Credits](#credits))         |
 
 The build is served from `/PlatyJam/` (the GitHub Pages project site). Set `BASE_PATH=/other/` to build for another path.
 
@@ -55,6 +57,8 @@ The build is served from `/PlatyJam/` (the GitHub Pages project site). Set `BASE
 - `src/audio/` is the audio engine (see [Audio](#audio)); `src/calibration/` is the latency calibration overlay.
 - `src/chart/` is the chart format: the schema shared with the converter (`schema.ts`) and `loadChart()` (`load.ts`).
 - `scripts/midi-to-chart.ts` and `scripts/charts/` are the MIDI-to-chart converter; `songs-src/` holds the song sources and `public/songs/` the generated charts.
+- `scripts/generate-song.ts` and `scripts/songgen/` are the song generator.
+- `assets/LICENSES.json` is the licence manifest; `scripts/licenses/` validates it and builds the credits data, `src/credits/credits.json`, with `scripts/generate-credits.ts`. `src/credits/schema.ts` describes that data.
 - `src/sw.ts` is the service worker. Four TypeScript projects keep DOM, worker and Node globals apart: `tsconfig.app.json`, `tsconfig.sw.json`, `tsconfig.node.json` (config files) and `tsconfig.scripts.json` (`scripts/`).
 - `assets-src/platyjam-icon.png` is the original icon artwork. It is not served; `pnpm icons` derives the PNGs in `public/` from it.
 
@@ -139,9 +143,26 @@ Subscribe with `engine.events.on(type, handler)`:
 
 ### Credits
 
-Piano samples: acoustic grand piano from FluidR3_GM by Frank Wen and contributors, MP3 conversion by Benjamin Gleitzman ([gleitz/midi-js-soundfonts](https://github.com/gleitz/midi-js-soundfonts)), licensed under [CC BY 3.0 US](https://creativecommons.org/licenses/by/3.0/us/). The files are unmodified. Full notice: [`web/public/soundfonts/fluidr3-gm/ATTRIBUTION.md`](web/public/soundfonts/fluidr3-gm/ATTRIBUTION.md).
+[`web/assets/LICENSES.json`](web/assets/LICENSES.json) is the licence manifest: one entry for every song, sample set and font PlatyJam ships, with its title, composer, arranger and author, source, licence and licence URL, modifications, retrieval date, a non-commercial flag and the paths it covers. Edit it by hand. `pnpm credits` validates it and writes the credits data, `web/src/credits/credits.json`, which the credits screen shows; nobody edits that file by hand, and a test fails when it is out of date.
 
-Sample song: Sonatine, Op. 34, first movement, by J. André (1741–1799), typeset by Bas Wassink for the [Mutopia Project](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=207), [public domain](https://www.mutopiaproject.org/legal.html#publicdomain). Notice: [`web/songs-src/andre-sonatine/ATTRIBUTION.md`](web/songs-src/andre-sonatine/ATTRIBUTION.md).
+The manifest is checked by `scripts/licenses/manifest.ts` and its tests:
+
+- **Licences:** only the names on the allowlist in `manifest.ts` pass: `Public Domain`, `CC0 1.0`, `CC BY 3.0`, `CC BY 3.0 US`, `CC BY 4.0`, `CC BY-NC 3.0`, `CC BY-NC 4.0` and `OFL-1.1`. Share-alike, no-derivatives and unknown licences fail. A Creative Commons licence or the OFL must link its own deed, and `nonCommercial` must be true exactly for the NC licences.
+- **Consistency:** every `songs-src/<id>/` has exactly one song entry and every song entry a directory; each song's title, composer, arranger and `license` in `song.json` and in its built chart match the manifest; every listed path exists.
+
+What ships:
+
+- **Piano samples:** acoustic grand piano from FluidR3_GM by Frank Wen and contributors, MP3 conversion by Benjamin Gleitzman ([gleitz/midi-js-soundfonts](https://github.com/gleitz/midi-js-soundfonts)), [CC BY 3.0 US](https://creativecommons.org/licenses/by/3.0/us/), unmodified. Full notice: [`web/public/soundfonts/fluidr3-gm/ATTRIBUTION.md`](web/public/soundfonts/fluidr3-gm/ATTRIBUTION.md).
+- **Font:** [Shantell Sans](https://github.com/arrowtype/shantell-sans) by the Shantell Sans Project Authors, [SIL Open Font License 1.1](https://openfontlicense.org/open-font-license-official-text/), from `@fontsource-variable/shantell-sans`.
+- **Songs** (each `songs-src/<id>/ATTRIBUTION.md` has the full notice):
+
+  | Song                                                                 | Composer                | Source                                                                                      | Licence       |
+  | -------------------------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------- | ------------- |
+  | Billabong Morning (`billabong-morning`)                              | PlatyJam song generator | generated, seed 95                                                                          | CC0 1.0       |
+  | Gymnopédie No. 1 (`satie-gymnopedie-1`)                              | E. Satie                | [Mutopia 37](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=37), Evin Robertson    | Public domain |
+  | Sonatine, Op. 34, I (`andre-sonatine`)                               | J. André                | [Mutopia 207](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=207), Bas Wassink     | Public domain |
+  | Für Elise, WoO 59 (`beethoven-fur-elise`)                            | L. van Beethoven        | [Mutopia 931](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=931), Stelios Samelis | Public domain |
+  | Sonata No. 8 "Pathétique", III. Rondo (`beethoven-pathetique-rondo`) | L. van Beethoven        | [Mutopia 296](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=296), Chris Sawer     | Public domain |
 
 ## Charts
 
@@ -210,7 +231,7 @@ andre-sonatine: andre-sonatine.mid → public/songs/andre-sonatine.json (95.8 s)
 
 ### Adding a song
 
-1. **Check the licence.** Use only music in the public domain or under a licence that allows copying and changing it with attribution: CC0, CC BY, or CC BY-NC (PlatyJam is free, with no ads or payments). Never CC BY-SA or any no-derivatives (ND) licence. Both the composition and the MIDI file count: a public-domain piece can still be someone's copyrighted MIDI. Pieces marked Public Domain on the [Mutopia Project](https://www.mutopiaproject.org/) are a good source.
+1. **Check the licence.** Use only music in the public domain or under a licence that allows copying and changing it with attribution: CC0, CC BY, or CC BY-NC (PlatyJam is free, with no ads or payments). Never CC BY-SA or any no-derivatives (ND) licence. Both the composition and the MIDI file count: a public-domain piece can still be someone's copyrighted MIDI. Pieces marked Public Domain on the [Mutopia Project](https://www.mutopiaproject.org/) are a good source. The manifest enforces this: a licence that is not on its allowlist fails the tests (see [Credits](#credits)).
 2. **Add a directory** `web/songs-src/<id>/`, where `<id>` is the song's slug (`a-z`, `0-9`, `-`). Put in it the MIDI file, unmodified, an `ATTRIBUTION.md` (where it came from, its licence, who made it; see `songs-src/andre-sonatine/`), and a `song.json`.
 3. **Write `song.json`.** Required: `title`, `composer`, `arranger` and `license` (`source` URL, `license` name, `author`, optional `licenseUrl`). Optional, with defaults:
 
@@ -228,7 +249,23 @@ andre-sonatine: andre-sonatine.mid → public/songs/andre-sonatine.json (95.8 s)
    Unknown fields are errors, so a typo does not go unnoticed. Run `pnpm charts <id>` once: it lists the file's tracks (index, name, channel, notes) so you can pick the melody, also when the selection matches nothing.
 
 4. **Build:** `pnpm charts` rebuilds every song (`pnpm charts <id>` only that one). Check the notes per second it prints: each difficulty should be clearly easier than the next. Tune `difficulties` in `song.json` if not.
-5. **Credit it:** add a line to [Credits](#credits) and commit the source directory and the generated `public/songs/<id>.json` together.
+5. **Credit it:** add a song entry to `assets/LICENSES.json` (the same title, composer, arranger and `license` fields as `song.json`, plus `modifications`, `retrieved`, `nonCommercial` and `paths`), run `pnpm credits`, and add the song to the table in [Credits](#credits). Commit the source directory, `public/songs/<id>.json`, the manifest and `src/credits/credits.json` together. `pnpm test` fails if the manifest and the song disagree.
+
+### The song generator
+
+`pnpm generate-song [id…]` writes `songs-src/<id>/<id>.mid` for every song directory with a `generate.json` (or only those named). The parameters live in that file, so the MIDI can always be rebuilt; the same parameters always give the same bytes, and a test regenerates each committed generated song and compares it with the committed file.
+
+| Field        | Meaning                                                                                  |
+| ------------ | ---------------------------------------------------------------------------------------- |
+| `seed`       | Seeds the PRNG (mulberry32); every random choice follows from it                         |
+| `key`        | Major key: `C`, `G`, `D`, `A`, `F`, `Bb` or `Eb`                                         |
+| `bpm`        | Constant tempo in quarter notes per minute (the piece is in 4/4)                         |
+| `form`       | Phrase order, starting and ending with A, e.g. `AABA`: the same letter is the same music |
+| `phraseBars` | Bars per phrase: `4` or `8`                                                              |
+
+The pure logic is in `scripts/songgen/`: `composeSong()` picks a common chord progression for each phrase letter, puts chord tones on beats 1 and 3 with scale steps in between, ends A phrases with a V–I cadence and B phrases on V, and closes the piece on a whole-note tonic chord. The left hand plays the chords as root, fifth, tenth, fifth on its own track. `generateSongMidi()` writes the MIDI with `@tonejs/midi`.
+
+To make a new one: create `songs-src/<id>/generate.json`, run `pnpm generate-song <id>`, try seeds until it sounds good and charts well, then add `song.json` (with `"melody": { "trackName": "melody" }`), `ATTRIBUTION.md` and a manifest entry as for any other song. Generated songs are CC0 1.0.
 
 ## Testing on an iPad
 

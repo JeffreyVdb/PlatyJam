@@ -1,0 +1,20 @@
+{
+  "title": "Piano Sonata No. 8 \"Pathétique\", Op. 13: III. Rondo",
+  "composer": "L. van Beethoven (1770–1827)",
+  "arranger": "Chris Sawer (Mutopia Project)",
+  "license": {
+    "source": "https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=296",
+    "license": "Public Domain",
+    "licenseUrl": "https://www.mutopiaproject.org/legal.html#publicdomain",
+    "author": "Chris Sawer, typeset for the Mutopia Project"
+  },
+  "difficulties": {
+    "easy": {
+      "minStrength": "any",
+      "minIntervalMs": 500
+    },
+    "normal": {
+      "minIntervalMs": 250
+    }
+  }
+}

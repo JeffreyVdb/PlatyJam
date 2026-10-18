@@ -5,3 +5,4 @@ coverage/
 package-lock.json
 public/*.png
 public/songs/
+src/credits/credits.json

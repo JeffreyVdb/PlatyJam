@@ -1,0 +1,24 @@
+{
+  "title": "Gymnopédie No. 1",
+  "composer": "E. Satie (1866–1925)",
+  "arranger": "Evin Robertson (Mutopia Project)",
+  "license": {
+    "source": "https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=37",
+    "license": "Public Domain",
+    "licenseUrl": "https://www.mutopiaproject.org/legal.html#publicdomain",
+    "author": "Evin Robertson, typeset for the Mutopia Project"
+  },
+  "difficulties": {
+    "easy": {
+      "minStrength": "beat",
+      "minIntervalMs": 1500,
+      "holdMinMs": 1500
+    },
+    "normal": {
+      "holdMinMs": 1500
+    },
+    "hard": {
+      "holdMinMs": 1500
+    }
+  }
+}
