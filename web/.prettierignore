@@ -1,0 +1,6 @@
+dist/
+dev-dist/
+coverage/
+.vitest/
+package-lock.json
+public/*.png

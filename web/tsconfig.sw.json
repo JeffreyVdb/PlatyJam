@@ -1,0 +1,11 @@
+{
+  // Service worker: WebWorker globals only, no DOM, so `self` is typed correctly.
+  // Modules under src/sw/ are shared with the app project and must stay lib-neutral.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "WebWorker"],
+    "types": []
+  },
+  "include": ["src/sw.ts", "src/sw/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}
