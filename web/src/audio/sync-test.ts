@@ -1,0 +1,164 @@
+import { createBackingTrack, type BackingTrack } from './backing-track';
+import type { GameAudio } from './game-audio';
+import type { AccompanimentNote } from './scheduler';
+
+/**
+ * The ?debug 3-minute sync test: generated accompaniment through the real
+ * scheduler and song clock, so audible sync can be judged against a beat
+ * indicator drawn from `songTime()`.
+ */
+export const SYNC_TEST_BPM = 120;
+export const SYNC_TEST_MS = 180_000;
+/** The backing-file variant is shorter: a generated buffer costs memory. */
+export const SYNC_BACKING_MS = 60_000;
+const LEAD_IN_MS = 1500;
+
+// C, G, Am, F, one bar each.
+const CHORDS = [
+  [48, 55, 60, 64],
+  [43, 55, 59, 62],
+  [45, 57, 60, 64],
+  [41, 53, 57, 60],
+] as const;
+
+/** A metronome on the piano (high C on the downbeat) over a four-chord loop. */
+export function syncTestNotes(bpm = SYNC_TEST_BPM, durationMs = SYNC_TEST_MS): AccompanimentNote[] {
+  const beatMs = 60_000 / bpm;
+  const notes: AccompanimentNote[] = [];
+  for (let beat = 0; beat * beatMs < durationMs; beat += 1) {
+    const t = beat * beatMs;
+    const downbeat = beat % 4 === 0;
+    notes.push({ t, pitch: downbeat ? 84 : 79, dur: beatMs * 0.25, vel: downbeat ? 110 : 80 });
+    if (downbeat) {
+      const chord = CHORDS[(beat / 4) % CHORDS.length] ?? CHORDS[0];
+      for (const pitch of chord) notes.push({ t, pitch, dur: beatMs * 3.6, vel: 55 });
+    }
+  }
+  return notes;
+}
+
+/** A backing "file": a low tick on every beat, for the backing-track path. */
+export function renderBackingTicks(
+  ctx: BaseAudioContext,
+  bpm = SYNC_TEST_BPM,
+  durationMs = SYNC_BACKING_MS,
+): AudioBuffer {
+  const rate = ctx.sampleRate;
+  const buffer = ctx.createBuffer(1, Math.round((durationMs / 1000) * rate), rate);
+  const data = buffer.getChannelData(0);
+  const beatFrames = (60 / bpm) * rate;
+  const tickFrames = Math.round(0.04 * rate);
+  for (let start = 0; start < data.length; start += beatFrames) {
+    const first = Math.round(start);
+    for (let i = 0; i < tickFrames && first + i < data.length; i += 1) {
+      const t = i / rate;
+      data[first + i] = Math.sin(2 * Math.PI * 660 * t) * Math.exp(-t / 0.012) * 0.6;
+    }
+  }
+  return buffer;
+}
+
+export type SyncSource = 'piano' | 'backing';
+
+export interface SyncTestReadout {
+  running: boolean;
+  source: SyncSource;
+  tempo: number;
+  songMs: number;
+  durationMs: number;
+  beatMs: number;
+  /** How far the audible output trails the context clock, real ms (≈ output latency). */
+  outputLagMs: number;
+  /** Context clock minus performance clock since the last (re)start, ms. Should stay near 0. */
+  clockDriftMs: number;
+  scheduled: number;
+  skipped: number;
+  lastLeadMs: number;
+}
+
+export interface SyncTest {
+  start(options: { tempo: number; source: SyncSource }): void;
+  stop(): void;
+  readout(): SyncTestReadout;
+}
+
+export function createSyncTest(audio: GameAudio, nowMs = () => performance.now()): SyncTest {
+  const { engine, accompaniment } = audio;
+  const beatMs = 60_000 / SYNC_TEST_BPM;
+  let running = false;
+  let source: SyncSource = 'piano';
+  let durationMs = SYNC_TEST_MS;
+  let backing: BackingTrack | undefined;
+  let anchor = { ctx: 0, perf: 0 };
+  // Held while paused: a suspended context clock stands still.
+  let clockDriftMs = 0;
+
+  const reanchor = () => {
+    anchor = { ctx: engine.context.currentTime, perf: nowMs() };
+  };
+
+  engine.events.on('interrupted', () => {
+    backing?.stop(30);
+  });
+  engine.events.on('resumed', () => {
+    if (!running) return;
+    reanchor();
+    backing?.play();
+  });
+
+  const stop = () => {
+    running = false;
+    accompaniment.stopAll(150);
+    backing?.stop(150);
+    backing = undefined;
+    engine.clock.pause();
+  };
+
+  return {
+    start(options) {
+      stop();
+      source = options.source;
+      durationMs = source === 'piano' ? SYNC_TEST_MS : SYNC_BACKING_MS;
+      engine.clock.setTempo(options.tempo);
+      engine.clock.start(-LEAD_IN_MS);
+      reanchor();
+      clockDriftMs = 0;
+      running = true;
+      if (source === 'piano') {
+        accompaniment.play(syncTestNotes());
+      } else {
+        backing = createBackingTrack({
+          target: engine,
+          clock: engine.clock,
+          audioOffsetMs: () => engine.offsets.audioOffsetMs,
+          buffer: renderBackingTicks(engine.context),
+        });
+        backing.play();
+      }
+    },
+    stop,
+    readout() {
+      const { clock, timeline } = engine;
+      const songMs = timeline.songTime();
+      if (running && songMs > durationMs + 2000) stop();
+      const ctxNow = engine.context.currentTime;
+      const stats = accompaniment.stats();
+      if (running && clock.isRunning) {
+        clockDriftMs = (ctxNow - anchor.ctx) * 1000 - (nowMs() - anchor.perf);
+      }
+      return {
+        running,
+        source,
+        tempo: clock.tempo,
+        songMs,
+        durationMs,
+        beatMs,
+        outputLagMs: clock.isRunning ? (clock.songTimeAt(ctxNow) - songMs) / clock.tempo : 0,
+        clockDriftMs,
+        scheduled: stats.scheduled,
+        skipped: stats.skipped,
+        lastLeadMs: stats.lastLeadMs,
+      };
+    },
+  };
+}

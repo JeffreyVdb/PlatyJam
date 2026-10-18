@@ -30,7 +30,7 @@ export interface AudioEngineEvents {
   /** The context's own state changed. */
   statechange: { state: AudioContextState };
   /** Audio started for the first time. */
-  unlocked: { by: string };
+  unlocked: Record<string, never>;
   /**
    * The song clock is paused and audio is fading out. Stop scheduling and show
    * "Tap to resume"; call `resumeFromGesture()` from that tap.
@@ -164,7 +164,6 @@ export function createAudioEngine({
   let resuming = false;
   let offsets: LatencyOffsets = { ...ZERO_OFFSETS };
   let removeUnlock = noop;
-  let lastUnlockEvent: string | undefined;
   let unlockedBy: string | undefined;
   const unlockAttempts: Record<string, number> = {};
 
@@ -184,9 +183,8 @@ export function createAudioEngine({
     events.emit('statechange', { state });
     if (state === 'running' && !unlocked) {
       unlocked = true;
-      unlockedBy = lastUnlockEvent;
       removeUnlock();
-      events.emit('unlocked', { by: unlockedBy ?? 'unknown' });
+      events.emit('unlocked', {});
       return;
     }
     if (!unlocked || interrupted) return;
@@ -299,9 +297,12 @@ export function createAudioEngine({
       const onGesture = (event: Event) => {
         if (unlocked || !isActivation(event)) return;
         unlockAttempts[event.type] = (unlockAttempts[event.type] ?? 0) + 1;
-        lastUnlockEvent = event.type;
         // Synchronously, inside the gesture: nothing may be awaited before this.
-        void ctx.resume().catch(noop);
+        const target = ctx;
+        void target.resume().then(() => {
+          // The first attempt that worked, for the debug readout.
+          if (isRunning(target)) unlockedBy ??= event.type;
+        }, noop);
       };
       const options = { capture: true, passive: true };
       for (const type of UNLOCK_EVENTS) doc.addEventListener(type, onGesture, options);
