@@ -30,7 +30,7 @@ export default defineConfig(
     languageOptions: { globals: globals.serviceworker },
   },
   {
-    files: ['*.mjs', '*.config.ts', 'scripts/**/*.mjs'],
+    files: ['*.mjs', '*.config.ts', 'scripts/**/*.mjs', 'scripts/**/*.ts'],
     languageOptions: { globals: globals.node },
   },
   prettier,

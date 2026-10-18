@@ -4,3 +4,4 @@ coverage/
 .vitest/
 package-lock.json
 public/*.png
+public/songs/

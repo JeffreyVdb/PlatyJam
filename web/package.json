@@ -11,19 +11,22 @@
     "dev": "vite",
     "build": "pnpm run typecheck && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -p tsconfig.app.json && tsc -p tsconfig.sw.json && tsc -p tsconfig.node.json",
+    "typecheck": "tsc -p tsconfig.app.json && tsc -p tsconfig.sw.json && tsc -p tsconfig.node.json && tsc -p tsconfig.scripts.json",
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write . && eslint --fix .",
     "test": "vitest run",
-    "icons": "node scripts/generate-icons.mjs"
+    "icons": "node scripts/generate-icons.mjs",
+    "charts": "node scripts/midi-to-chart.ts"
   },
   "dependencies": {
     "@fontsource-variable/shantell-sans": "^5.3.0",
     "three": "^0.186.1",
-    "workbox-window": "^7.4.1"
+    "workbox-window": "^7.4.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@tonejs/midi": "2.0.28",
     "@types/node": "^26.6.5",
     "@types/three": "^0.186.0",
     "eslint": "^10.13.0",

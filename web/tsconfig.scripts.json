@@ -1,0 +1,12 @@
+{
+  // Node scripts written in TypeScript (`pnpm charts`), run by Node's type stripping.
+  // They import the lib-neutral chart schema from src/chart/, typechecked here too.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "lib": ["ES2023"],
+    "types": ["node"]
+  },
+  "include": ["scripts/**/*.ts"]
+}

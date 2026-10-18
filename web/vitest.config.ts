@@ -4,6 +4,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'jsdom',
-    include: ['src/**/*.test.ts'],
+    // Script tests run under Node: they start with `// @vitest-environment node`.
+    include: ['src/**/*.test.ts', 'scripts/**/*.test.ts'],
   },
 });

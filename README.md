@@ -17,7 +17,7 @@ PlatyJam is a musical rhythm game planned for the browser. Follow the beat, hit 
 
 ## Status
 
-`web/` holds the app shell: an offline-capable PWA with a placeholder stage (tiles falling down four lanes), and the audio engine: game clock, piano sampler, accompaniment scheduler and latency calibration. Gameplay and songs come next.
+`web/` holds the app shell: an offline-capable PWA with a placeholder stage (tiles falling down four lanes), the audio engine (game clock, piano sampler, accompaniment scheduler and latency calibration), and the chart format with a MIDI-to-chart converter and one sample song. Gameplay comes next.
 
 ## Web app (`web/`)
 
@@ -25,6 +25,7 @@ PlatyJam is a musical rhythm game planned for the browser. Follow the beat, hit 
 
 - **Node 26** and **pnpm 12**, pinned in [`mise.toml`](mise.toml) (`mise install` sets both up), `web/.nvmrc` and `packageManager` in `web/package.json`. CI uses the same versions.
 - **TypeScript is pinned to `~6.0.3`** on purpose. typescript-eslint 8 supports only `<6.1.0`, and TypeScript 7 ships no compiler API for it to use yet. Do not bump to 6.1 or 7.x until typescript-eslint supports them.
+- Node runs the TypeScript scripts in `web/scripts/` directly (type stripping, no build step). They use only erasable syntax and import relative files with their `.ts` extension.
 - No dependency needs install scripts, so pnpm's default build-script blocking stays on and there is no `allowBuilds` list. If a new dependency needs one, `pnpm install` fails and names it; allow just that package under `allowBuilds` in a `pnpm-workspace.yaml`.
 
 ### Commands
@@ -40,8 +41,9 @@ Run these in `web/`:
 | `pnpm test`      | Unit tests (Vitest, jsdom)                                      |
 | `pnpm lint`      | ESLint (type-checked rules) and Prettier check                  |
 | `pnpm format`    | Prettier write, then ESLint autofix                             |
-| `pnpm typecheck` | `tsc` for the app, service worker and config projects           |
+| `pnpm typecheck` | `tsc` for the app, service worker, config and scripts projects  |
 | `pnpm icons`     | Regenerate the app icons from `web/assets-src/`                 |
+| `pnpm charts`    | Rebuild every song chart (see [Charts](#charts))                |
 
 The build is served from `/PlatyJam/` (the GitHub Pages project site). Set `BASE_PATH=/other/` to build for another path.
 
@@ -51,7 +53,9 @@ The build is served from `/PlatyJam/` (the GitHub Pages project site). Set `BASE
 - `src/render/renderer-host.ts` owns the canvas, the WebGL renderer, the render loop and context-loss recovery.
 - `src/scene/` is the placeholder stage. `src/hud/` is the HTML layer above it, including the "Tap to resume" overlay and the `?debug` Audio tools.
 - `src/audio/` is the audio engine (see [Audio](#audio)); `src/calibration/` is the latency calibration overlay.
-- `src/sw.ts` is the service worker. Three TypeScript projects keep DOM and worker globals apart: `tsconfig.app.json`, `tsconfig.sw.json`, `tsconfig.node.json`.
+- `src/chart/` is the chart format: the schema shared with the converter (`schema.ts`) and `loadChart()` (`load.ts`).
+- `scripts/midi-to-chart.ts` and `scripts/charts/` are the MIDI-to-chart converter; `songs-src/` holds the song sources and `public/songs/` the generated charts.
+- `src/sw.ts` is the service worker. Four TypeScript projects keep DOM, worker and Node globals apart: `tsconfig.app.json`, `tsconfig.sw.json`, `tsconfig.node.json` (config files) and `tsconfig.scripts.json` (`scripts/`).
 - `assets-src/platyjam-icon.png` is the original icon artwork. It is not served; `pnpm icons` derives the PNGs in `public/` from it.
 
 ### Lifecycle events
@@ -136,6 +140,95 @@ Subscribe with `engine.events.on(type, handler)`:
 ### Credits
 
 Piano samples: acoustic grand piano from FluidR3_GM by Frank Wen and contributors, MP3 conversion by Benjamin Gleitzman ([gleitz/midi-js-soundfonts](https://github.com/gleitz/midi-js-soundfonts)), licensed under [CC BY 3.0 US](https://creativecommons.org/licenses/by/3.0/us/). The files are unmodified. Full notice: [`web/public/soundfonts/fluidr3-gm/ATTRIBUTION.md`](web/public/soundfonts/fluidr3-gm/ATTRIBUTION.md).
+
+Sample song: Sonatine, Op. 34, first movement, by J. André (1741–1799), typeset by Bas Wassink for the [Mutopia Project](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=207), [public domain](https://www.mutopiaproject.org/legal.html#publicdomain). Notice: [`web/songs-src/andre-sonatine/ATTRIBUTION.md`](web/songs-src/andre-sonatine/ATTRIBUTION.md).
+
+## Charts
+
+A chart is one JSON file per song, `web/public/songs/<id>.json`, served from `<base>songs/<id>.json` and cached at runtime like other songs. `pnpm charts` generates them from MIDI files; nobody edits them by hand.
+
+The game loads one with `loadChart(url)` from `src/chart/load.ts`: it fetches the file and validates it with `parseChart()`, which throws an `Error` listing every problem. The schema (`src/chart/schema.ts`, zod/mini) and the types inferred from it (`Chart`, `Tile`, `Note`) are shared by the game and the converter.
+
+### Format (version 1)
+
+All times are integer ms of chart time (the song at 1×), measured from `t = 0`, the first note of the song (tile or accompaniment). Velocities are MIDI velocities, integers 1 to 127.
+
+| Field           | Meaning                                                                                       |
+| --------------- | --------------------------------------------------------------------------------------------- |
+| `version`       | Always `1`.                                                                                   |
+| `id`            | Slug (`a-z`, `0-9`, `-`), the same as the file name.                                          |
+| `title`         | Song title.                                                                                   |
+| `composer`      | Who wrote the music.                                                                          |
+| `arranger`      | Who made this arrangement or edition.                                                         |
+| `bpm`           | Tempo at the start. Informational only: tempo changes are already in the ms times.            |
+| `durationMs`    | End of the last tile or note (the largest `t + dur`).                                         |
+| `leadInMs`      | How long the game waits before `t = 0`, so the first tiles can scroll in.                     |
+| `license`       | `{ source, license, licenseUrl?, author }`: where the music came from, its licence and maker. |
+| `audio`         | Optional recording: `{ src, offsetMs }`, where `offsetMs` is its position at `t = 0`.         |
+| `accompaniment` | Notes the game plays by itself on every difficulty.                                           |
+| `difficulties`  | `{ easy, normal, hard }`, each `{ tiles, accompaniment? }`.                                   |
+
+- **Tile** `{ t, lane, dur?, pitches, vel }`: `lane` is 0 (left) to 3 (right). A tile with `dur` is a hold. `pitches` are the notes the tile plays when hit (at least one); the converter always writes one. Two tiles with the same `t` are a double.
+- **Note** `{ t, pitch, dur, vel }`: the same shape as the audio engine's `AccompanimentNote`, so the scheduler plays chart notes directly. A type test fails if the two drift apart.
+- **Per-difficulty `accompaniment`** holds the melody notes that difficulty did not turn into tiles: notes thinned out, chord notes beyond a double, doubles that were dropped. The game plays the top-level `accompaniment` plus the chosen difficulty's, so every difficulty sounds like the whole song.
+
+`parseChart()` rejects a chart that breaks a lane rule, on any difficulty:
+
+- tiles are sorted by `t`, then `lane`, and no two tiles share both;
+- in each lane a tile starts at or after the end of the previous one (`t + (dur ?? 0)`);
+- at most two tiles are active at any instant (a tap at its `t`, a hold over `[t, t + dur)`).
+
+### How the converter works
+
+`scripts/midi-to-chart.ts` only handles files and logging; the pure, deterministic steps are in `scripts/charts/`:
+
+1. **Split** (`extract.ts`): the melody tracks (see `melody` below) become tiles; every other note is accompaniment. Drum tracks (channel 10) are dropped.
+2. **Time** (`timing.ts`): onsets and ends within a quarter of a grid step (default a sixteenth note) snap to the grid; the rest, triplets for example, stay put. Ticks become ms through the file's tempo map, and everything shifts so the first note is at 0.
+3. **Chords** (`clusters.ts`): melody onsets within 30 ms are one chord. Each chord gets a metric strength from its tick and the time signatures: downbeat, strong beat (beat 3 in 4/4, beat 2 in 2/2 and 2/4, beat 4 in 6/8), beat, half beat, quarter beat, or none.
+4. **Thin** (per difficulty): chords weaker than `minStrength` are dropped. Where two onsets are closer than `minIntervalMs`, the stronger (then the earlier) one stays. Hard's default `minIntervalMs` is 0, so it keeps every chord.
+5. **Place** (`lanes.ts`): the highest note of a chord is the tile. The lowest of the others makes a double when `doubles` allows it, on the left of the higher note; the rest of the chord goes to the difficulty's accompaniment. Notes at least `holdMinMs` long become holds. Lanes follow the pitch contour: higher moves right, lower moves left, a repeated pitch stays in its lane, and leaps move two or three lanes. At an edge the motion bounces back and keeps that way until the melody turns. A lane is free `minLaneGapMs` after its previous tile ends. A hold that is in the way, or that would make a third active tile, is trimmed to end `minLaneGapMs` before the new tile, and becomes a tap if that leaves less than half of `holdMinMs`. If no lane fits, the double is dropped, then the note goes to the accompaniment: a rule is never broken.
+6. **Check**: the chart is validated with the shared schema and the lane rules, including the lane gap and the pitch order of doubles. Nothing is written for a song that fails, and the command exits non-zero.
+
+The thresholds per difficulty, with their defaults:
+
+| Threshold       | Easy     | Normal   | Hard  | Meaning                                                                              |
+| --------------- | -------- | -------- | ----- | ------------------------------------------------------------------------------------ |
+| `minStrength`   | `strong` | `any`    | `any` | Weakest onset kept: `downbeat`, `strong`, `beat`, `half-beat`, `quarter-beat`, `any` |
+| `minIntervalMs` | 450      | 280      | 0     | Minimum time between kept onsets                                                     |
+| `doubles`       | `none`   | `strong` | `all` | Which chords become doubles: `all`, `beats`, `strong`, `none`                        |
+| `holdMinMs`     | 500      | 700      | 800   | Notes at least this long are holds                                                   |
+| `minLaneGapMs`  | 250      | 150      | 100   | Minimum time from a tile's end to the next tile in its lane                          |
+
+So Hard plays the whole melody (at most two notes per chord; a note goes to the accompaniment only where no lane fits it), Normal drops fast runs and ornaments and keeps doubles for strong beats, and Easy plays strong beats only, without doubles and with more holds. `pnpm charts` prints tiles, holds, doubles and notes per second for each difficulty. For the sample song:
+
+```
+andre-sonatine: andre-sonatine.mid → public/songs/andre-sonatine.json (95.8 s)
+  easy    114 tiles,  55 holds,   0 doubles, 1.19 notes/s
+  normal  228 tiles,  21 holds,  25 doubles, 2.38 notes/s
+  hard    292 tiles,  21 holds,  51 doubles, 3.05 notes/s
+```
+
+### Adding a song
+
+1. **Check the licence.** Use only music in the public domain or under a licence that allows copying and changing it with attribution: CC0, CC BY, or CC BY-NC (PlatyJam is free, with no ads or payments). Never CC BY-SA or any no-derivatives (ND) licence. Both the composition and the MIDI file count: a public-domain piece can still be someone's copyrighted MIDI. Pieces marked Public Domain on the [Mutopia Project](https://www.mutopiaproject.org/) are a good source.
+2. **Add a directory** `web/songs-src/<id>/`, where `<id>` is the song's slug (`a-z`, `0-9`, `-`). Put in it the MIDI file, unmodified, an `ATTRIBUTION.md` (where it came from, its licence, who made it; see `songs-src/andre-sonatine/`), and a `song.json`.
+3. **Write `song.json`.** Required: `title`, `composer`, `arranger` and `license` (`source` URL, `license` name, `author`, optional `licenseUrl`). Optional, with defaults:
+
+   | Field               | Default                        | Meaning                                                                                                                                                 |
+   | ------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | `midi`              | the only `.mid` file           | MIDI file name in the directory                                                                                                                         |
+   | `leadInMs`          | `2000`                         | Wait before `t = 0`                                                                                                                                     |
+   | `audio`             | none                           | `{ src, offsetMs = 0 }`: a recording to play in sync                                                                                                    |
+   | `melody`            | first track with notes         | `track` (index), `trackName`, `channel` (0-based): a track matching all given is melody. `splitPitch`: only its notes at or above this pitch are melody |
+   | `includePercussion` | `false`                        | Keep drum tracks in the accompaniment                                                                                                                   |
+   | `quantize`          | `{ grid: 4, tolerance: 0.25 }` | Grid steps per quarter note, and how close (fraction of a step) an onset must be to snap                                                                |
+   | `mergeWindowMs`     | `30`                           | Melody onsets this close are one chord                                                                                                                  |
+   | `difficulties`      | `{}`                           | Per difficulty (`easy`, `normal`, `hard`), any threshold from the table above                                                                           |
+
+   Unknown fields are errors, so a typo does not go unnoticed. Run `pnpm charts <id>` once: it lists the file's tracks (index, name, channel, notes) so you can pick the melody, also when the selection matches nothing.
+
+4. **Build:** `pnpm charts` rebuilds every song (`pnpm charts <id>` only that one). Check the notes per second it prints: each difficulty should be clearly easier than the next. Tune `difficulties` in `song.json` if not.
+5. **Credit it:** add a line to [Credits](#credits) and commit the source directory and the generated `public/songs/<id>.json` together.
 
 ## Testing on an iPad
 
