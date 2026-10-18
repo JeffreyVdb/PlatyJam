@@ -23,7 +23,7 @@ describe('openCalibration', () => {
     expect(engine.silence).toHaveBeenCalledTimes(1);
   });
 
-  it('silences again when a round starts', () => {
+  it('silences again when a round starts, and keeps focus in the sheet', () => {
     const engine = fakeEngine();
     const handle = openCalibration({
       root: document.body,
@@ -32,6 +32,8 @@ describe('openCalibration', () => {
     const start = [...document.querySelectorAll('button')].find((b) => b.textContent === 'Start');
     start?.click();
     expect(engine.silence).toHaveBeenCalledTimes(2);
+    // Start is gone: focus stays in the sheet, so Escape and Space still work.
+    expect(document.activeElement?.className).toContain('calibration-body');
     // Before the round's first frame: the fake engine has no clock to draw from.
     handle.close();
   });

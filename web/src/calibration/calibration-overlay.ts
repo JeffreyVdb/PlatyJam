@@ -211,6 +211,8 @@ export function openCalibration({
   const title = el('h2', 'calibration-title', 'Timing check');
   title.id = 'calibration-title';
   const body = el('div', 'calibration-body');
+  // Holds focus during a round, once the button that started it is gone.
+  body.tabIndex = -1;
   bar.append(
     title,
     button('Close', 'quiet', () => {
@@ -285,6 +287,7 @@ export function openCalibration({
     );
     show(view);
     body.classList.add('is-pad');
+    body.focus({ preventScroll: true });
 
     if (!(await whenRunning(engine))) {
       if (!closed) showIntro("PlatyJam couldn't start its sound. Tap Start to try again.");

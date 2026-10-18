@@ -266,8 +266,11 @@ body {
 }
 
 .debug-heading {
-  margin-bottom: 8px;
+  /* A 44 px target; padding rather than flex keeps the disclosure marker. */
+  margin-bottom: 4px;
+  padding: 10px 0;
   font-size: 1rem;
+  line-height: 24px;
   font-weight: 680;
   cursor: pointer;
 }
@@ -286,6 +289,7 @@ body {
 }
 
 .debug-choice .hud-button {
+  min-width: 44px;
   padding: 0 12px;
 }
 
@@ -587,6 +591,11 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+/* Focused while a round runs so Escape and Space keep working; it is not a control. */
+.calibration-body:focus {
+  outline: none;
 }
 
 .calibration-run {
