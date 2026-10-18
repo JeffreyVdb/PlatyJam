@@ -90,8 +90,12 @@ export function createSampler({ target, buffers }: SamplerOptions): Sampler {
     const level = envelopeAt(voice.envelope, at);
     const end = Math.min(at + fadeSec, voice.stopAt);
     const param = voice.gain.gain;
+    // Cancelling drops any ramp still running at `at` (an earlier release, the tail
+    // fade). Ramping to the mirrored level at `at` redraws that stretch exactly, so
+    // the gain never steps; a setValueAtTime here would hold the old value until `at`.
+    // (cancelAndHoldAtTime would do the same, but not every browser has it.)
     param.cancelScheduledValues(at);
-    param.setValueAtTime(level, at);
+    param.linearRampToValueAtTime(level, at);
     param.linearRampToValueAtTime(0, end);
     voice.envelope = [
       ...voice.envelope.filter((p) => p.t < at),

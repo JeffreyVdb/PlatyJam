@@ -1,18 +1,56 @@
 import { describe, expect, it } from 'vitest';
-import { createSampler, MAX_VOICES, RELEASE_S, TAIL_FADE_S, velocityGain } from './sampler';
+import {
+  createSampler,
+  MAX_VOICES,
+  RELEASE_S,
+  RESTRIKE_FADE_S,
+  TAIL_FADE_S,
+  velocityGain,
+} from './sampler';
 
-/** Records automation calls the way the sampler issues them. */
+interface AutomationEvent {
+  type: 'set' | 'ramp';
+  v: number;
+  t: number;
+}
+
+/**
+ * Records automation calls the way the sampler issues them, and keeps the event
+ * list as Web Audio does, so `valueAt` gives the gain the listener would hear.
+ */
 class FakeParam {
   value = 1;
   readonly calls: [string, ...number[]][] = [];
+  events: AutomationEvent[] = [];
   setValueAtTime(v: number, t: number) {
     this.calls.push(['set', v, t]);
+    this.insert({ type: 'set', v, t });
   }
   linearRampToValueAtTime(v: number, t: number) {
     this.calls.push(['ramp', v, t]);
+    this.insert({ type: 'ramp', v, t });
   }
   cancelScheduledValues(t: number) {
     this.calls.push(['cancel', t]);
+    this.events = this.events.filter((event) => event.t < t);
+  }
+  /** set holds its value until the next event; a ramp interpolates from the event before it. */
+  valueAt(t: number): number {
+    let previous: AutomationEvent | undefined;
+    for (const event of this.events) {
+      if (event.t > t) {
+        if (event.type === 'set') break;
+        const from = previous ?? { v: this.value, t };
+        return from.v + ((event.v - from.v) * (t - from.t)) / (event.t - from.t);
+      }
+      previous = event;
+    }
+    return previous?.v ?? this.value;
+  }
+  private insert(event: AutomationEvent) {
+    const at = this.events.findIndex((other) => other.t > event.t);
+    if (at === -1) this.events.push(event);
+    else this.events.splice(at, 0, event);
   }
 }
 
@@ -94,7 +132,7 @@ describe('createSampler', () => {
     sampler.noteOff(voice);
     expect(gains[0]?.calls.slice(3)).toEqual([
       ['cancel', 11],
-      ['set', 1, 11],
+      ['ramp', 1, 11],
       ['ramp', 0, 11 + RELEASE_S],
     ]);
     expect(sources[0]?.stoppedAt).toBeCloseTo(11 + RELEASE_S, 9);
@@ -120,6 +158,57 @@ describe('createSampler', () => {
     expect(sources[1]?.stoppedAt).toBeUndefined();
     // The released voice still sounds until its fade ends.
     expect(sampler.activeVoices()).toBe(3);
+  });
+
+  it('keeps a pending release ramp when the pitch is struck again inside it', () => {
+    const { gains, sampler } = setup();
+    const voice = sampler.noteOn(60, 127);
+    if (!voice) throw new Error('no voice');
+    // Released at 10.5: 1 → 0 by 10.75. Struck again at 10.6, when the gain is 0.6.
+    sampler.noteOff(voice, 10.5);
+    sampler.noteOn(60, 127, 10.6);
+    const gain = gains[0];
+    if (!gain) throw new Error('no gain');
+    expect(gain.calls.slice(-3)).toEqual([
+      ['cancel', 10.6],
+      ['ramp', expect.closeTo(0.6, 9), 10.6],
+      ['ramp', 0, expect.closeTo(10.6 + RESTRIKE_FADE_S, 9)],
+    ]);
+    // The first release still runs up to the re-strike: no step, no click.
+    expect(gain.valueAt(10.5)).toBeCloseTo(1, 9);
+    expect(gain.valueAt(10.55)).toBeCloseTo(0.8, 9);
+    expect(gain.valueAt(10.6 - 1e-6)).toBeCloseTo(0.6, 5);
+    expect(gain.valueAt(10.64)).toBeCloseTo(0.3, 9);
+    expect(gain.valueAt(10.7)).toBe(0);
+  });
+
+  it('releases inside the tail fade from the fading level, on the same line', () => {
+    const { gains, sampler } = setup();
+    const voice = sampler.noteOn(60, 127);
+    if (!voice) throw new Error('no voice');
+    // The tail fade runs 12.96 → 13; release half-way through it.
+    sampler.noteOff(voice, 12.98);
+    const gain = gains[0];
+    if (!gain) throw new Error('no gain');
+    expect(gain.valueAt(12.97)).toBeCloseTo(0.75, 9);
+    expect(gain.valueAt(12.98)).toBeCloseTo(0.5, 9);
+    expect(gain.valueAt(12.99)).toBeCloseTo(0.25, 9);
+    expect(gain.valueAt(13)).toBe(0);
+  });
+
+  it('fades from the level of an earlier release when stopping everything', () => {
+    const { context, gains, sampler } = setup();
+    const voice = sampler.noteOn(60, 127);
+    if (!voice) throw new Error('no voice');
+    sampler.noteOff(voice, 10.5);
+    context.currentTime = 10.625;
+    sampler.stopAll(50);
+    const gain = gains[0];
+    if (!gain) throw new Error('no gain');
+    expect(gain.valueAt(10.6)).toBeCloseTo(0.6, 9);
+    expect(gain.valueAt(10.625)).toBeCloseTo(0.5, 9);
+    expect(gain.valueAt(10.65)).toBeCloseTo(0.25, 9);
+    expect(gain.valueAt(10.675)).toBe(0);
   });
 
   it(`steals the oldest voice with a fast fade beyond ${MAX_VOICES} voices`, () => {
