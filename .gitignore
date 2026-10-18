@@ -1,0 +1,46 @@
+# Rust build output and temporary files
+target/
+**/*.rs.bk
+
+# Keep Cargo.lock versioned for this application.
+
+# JavaScript dependencies, caches, and build output
+node_modules/
+dist/
+build/
+.cache/
+.parcel-cache/
+.vite/
+.npm/
+.eslintcache
+*.tsbuildinfo
+coverage/
+.nyc_output/
+
+# Yarn local state (keep releases and other project configuration)
+.pnp.*
+.yarn/cache/
+.yarn/unplugged/
+.yarn/install-state.gz
+.yarn/build-state.yml
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local environment configuration
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Editor and operating system files
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
