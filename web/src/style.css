@@ -247,6 +247,467 @@ body {
   gap: 8px;
 }
 
+.debug-panel {
+  max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 6.5rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--river-raised) transparent;
+  scrollbar-width: thin;
+}
+
+.debug-status--lines {
+  white-space: pre-line;
+}
+
+.debug-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgb(201 219 214 / 16%);
+}
+
+.debug-heading {
+  margin-bottom: 8px;
+  font-size: 1rem;
+  font-weight: 680;
+  cursor: pointer;
+}
+
+.debug-heading:focus-visible {
+  outline: 3px solid var(--ripple);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.debug-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.debug-choice .hud-button {
+  padding: 0 12px;
+}
+
+.debug-choice .hud-button[aria-pressed='true'] {
+  background: var(--ripple);
+  color: var(--river-deep);
+  box-shadow: none;
+}
+
+/* ?debug tap pad: a piano key for filming tap-to-sound latency. */
+.tap-pad {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 2px;
+  width: 100%;
+  min-height: 112px;
+  margin-top: 12px;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: var(--radius-control) var(--radius-control) 22px 22px;
+  background: var(--foam);
+  color: var(--river-deep);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  touch-action: none;
+  box-shadow:
+    inset 0 -6px 0 var(--foam-soft),
+    0 4px 12px rgb(3 14 22 / 35%);
+}
+
+.tap-pad:active {
+  background: var(--bill);
+  box-shadow:
+    inset 0 -2px 0 var(--bill-pressed),
+    0 2px 6px rgb(3 14 22 / 35%);
+  transform: translateY(2px);
+}
+
+.tap-pad:focus-visible {
+  outline: 3px solid var(--ripple);
+  outline-offset: 3px;
+}
+
+.tap-pad-label {
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+.tap-pad-hint {
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+.sync-test {
+  margin-top: 14px;
+}
+
+.sync-test-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sync-title {
+  flex: 1;
+  font-weight: 600;
+}
+
+.sync-beat {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 2px rgb(111 227 207 / 45%);
+  transition: background-color 140ms ease-out;
+}
+
+/* Lighting up is instant: a fade-in would make the beat look late. */
+.sync-beat[data-lit='beat'] {
+  background: var(--ripple);
+  transition: none;
+}
+
+.sync-beat[data-lit='down'] {
+  background: var(--bill);
+  transition: none;
+}
+
+.sync-test .debug-status {
+  margin-top: 10px;
+}
+
+/* "Tap to resume": the whole overlay is one button. Replaced by PLA-7's pause screen. */
+.resume-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 0;
+  padding: calc(env(safe-area-inset-top) + var(--edge))
+    calc(env(safe-area-inset-right) + var(--edge)) calc(env(safe-area-inset-bottom) + var(--edge))
+    calc(env(safe-area-inset-left) + var(--edge));
+  border: 0;
+  background: rgb(13 43 62 / 90%);
+  color: var(--foam);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+  touch-action: manipulation;
+  animation: overlay-in 280ms var(--ease-out) both;
+}
+
+.resume-overlay:focus-visible {
+  outline: none;
+}
+
+.resume-overlay:focus-visible .resume-disc {
+  outline: 3px solid var(--ripple);
+  outline-offset: 6px;
+}
+
+.resume-disc {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 104px;
+  height: 104px;
+  margin-bottom: 14px;
+  border-radius: 50%;
+  background: var(--bill);
+  box-shadow: 0 10px 28px rgb(3 14 22 / 50%);
+}
+
+/* Ripples spreading on the billabong, the overlay's one moving part. */
+.resume-disc::before,
+.resume-disc::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--ripple);
+  opacity: 0;
+  animation: ripple-out 2.4s var(--ease-out) infinite;
+}
+
+.resume-disc::after {
+  animation-delay: 1.2s;
+}
+
+.resume-overlay:active .resume-disc {
+  background: var(--bill-pressed);
+  transform: scale(0.97);
+}
+
+.resume-icon {
+  width: 52px;
+  height: 52px;
+  fill: var(--river-deep);
+}
+
+.resume-title {
+  font-size: clamp(1.75rem, 5vmin, 2.5rem);
+  font-weight: 760;
+  letter-spacing: -0.015em;
+  line-height: 1.1;
+  text-wrap: balance;
+}
+
+.resume-hint {
+  max-width: 28ch;
+  font-size: 1.125rem;
+  font-weight: 450;
+  line-height: 1.4;
+  color: var(--foam-soft);
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes ripple-out {
+  0% {
+    opacity: 0.7;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.9);
+  }
+}
+
+/* Latency calibration: a full-screen sheet; while a round runs, its body is the tap pad. */
+.calibration {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  padding: calc(env(safe-area-inset-top) + var(--edge))
+    calc(env(safe-area-inset-right) + var(--edge)) calc(env(safe-area-inset-bottom) + var(--edge))
+    calc(env(safe-area-inset-left) + var(--edge));
+  background: var(--river-deep);
+  color: var(--foam);
+  animation: overlay-in 220ms var(--ease-out) both;
+}
+
+.calibration-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--edge);
+}
+
+.calibration-title {
+  margin: 0;
+  font-size: 1.375rem;
+  font-weight: 720;
+  letter-spacing: -0.01em;
+}
+
+.calibration-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.calibration-body.is-pad {
+  overflow: hidden;
+  cursor: pointer;
+  touch-action: none;
+}
+
+/* Auto margins centre the content but, unlike align-items, never clip it when it overflows. */
+.calibration-column {
+  width: min(34rem, 100%);
+  margin: auto;
+  padding: 24px 0;
+}
+
+.calibration-lede {
+  margin: 0 0 20px;
+  font-size: 1.125rem;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.calibration-heading {
+  margin: 0 0 12px;
+  font-size: 1.75rem;
+  font-weight: 740;
+  letter-spacing: -0.015em;
+  line-height: 1.15;
+}
+
+.calibration-steps {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 20px;
+  padding-left: 1.4em;
+  font-size: 1.0625rem;
+  line-height: 1.45;
+}
+
+.calibration-steps li::marker {
+  color: var(--bill);
+  font-weight: 700;
+}
+
+.calibration-aside {
+  margin: 0 0 24px;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  color: var(--foam-soft);
+  text-wrap: pretty;
+}
+
+.calibration-notice {
+  margin: 0 0 20px;
+  padding: 12px 16px;
+  border-radius: var(--radius-control);
+  background: var(--river);
+  outline: 2px solid var(--bill);
+  outline-offset: -2px;
+  line-height: 1.4;
+}
+
+.calibration-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.calibration-run {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(14px, 4vh, 28px);
+  margin: auto;
+  padding: 24px 0;
+  text-align: center;
+  pointer-events: none;
+}
+
+.calibration-step {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--foam-soft);
+}
+
+.calibration-target {
+  display: grid;
+  place-items: center;
+  width: clamp(132px, 30vmin, 220px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 3px rgb(111 227 207 / 40%);
+  transition:
+    background-color 140ms ease-out,
+    box-shadow 140ms ease-out;
+}
+
+/* Lighting up is instant: any fade-in would bias the Watch round late. */
+.calibration-target[data-lit='beat'] {
+  background: var(--bill);
+  box-shadow: 0 0 0 10px rgb(254 177 2 / 22%);
+  transition: none;
+}
+
+.calibration-target[data-lit='count'] {
+  background: rgb(111 227 207 / 30%);
+  transition: none;
+}
+
+.calibration-count {
+  font-size: clamp(2.5rem, 9vmin, 4rem);
+  font-weight: 760;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.calibration-instruction {
+  max-width: 30ch;
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 500;
+  line-height: 1.4;
+  text-wrap: balance;
+}
+
+.calibration-ripple {
+  position: absolute;
+  width: 72px;
+  height: 72px;
+  margin: -36px 0 0 -36px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--ripple);
+  pointer-events: none;
+  animation: tap-ripple 420ms var(--ease-out) both;
+}
+
+@keyframes tap-ripple {
+  from {
+    opacity: 0.8;
+    transform: scale(0.4);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.4);
+  }
+}
+
+.calibration-values {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 18px;
+}
+
+.calibration-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 4px 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid rgb(201 219 214 / 16%);
+}
+
+.calibration-label {
+  font-size: 1.0625rem;
+  font-weight: 500;
+}
+
+.calibration-value {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 720;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.calibration-nudge {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+}
+
+.calibration ::selection {
+  background: var(--ripple);
+  color: var(--river-deep);
+}
+
 .noscript {
   position: fixed;
   inset: 0;
@@ -260,7 +721,16 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .notice,
-  .notice.is-leaving {
+  .notice.is-leaving,
+  .resume-overlay,
+  .calibration,
+  .calibration-ripple {
     animation: none;
+  }
+
+  .resume-disc::before,
+  .resume-disc::after {
+    animation: none;
+    opacity: 0;
   }
 }

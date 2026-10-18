@@ -1,4 +1,5 @@
 import type { WebGLRenderer } from 'three';
+import type { GameAudio } from '../audio/game-audio';
 import type { RendererHost, RendererHostState } from '../render/renderer-host';
 import type { Lifecycle } from './lifecycle';
 
@@ -15,6 +16,8 @@ export interface DebugHook {
   state(): RendererHostState & { sceneBuilds: number };
   readonly renderer: WebGLRenderer;
   readonly lifecycle: Lifecycle;
+  /** The audio engine, piano and accompaniment, when sound could start. */
+  audio?: GameAudio;
 }
 
 declare global {
