@@ -540,6 +540,25 @@ describe('game session', () => {
       expect(session.state).toBe('ready');
     });
 
+    it('leaves the recording alone when an overtaken load resolves after the next one started', async () => {
+      let deliverStale: (chart: Chart) => void = () => undefined;
+      session.load({
+        ...setup([]),
+        chart: new Promise<Chart>((resolve) => {
+          deliverStale = resolve;
+        }),
+      });
+      await loadedWithAudio();
+      session.start();
+      expect(session.state).toBe('leadIn');
+      fake.backing.load.mockClear();
+      deliverStale(chartWith([tap(1000, 0)]));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fake.backing.load).not.toHaveBeenCalled();
+      expect(fake.backing.state).toBe('loaded');
+      expect(session.state).toBe('leadIn');
+    });
+
     it('plays the song without it when it failed to load', async () => {
       fake.backingControl.fail = true;
       await loadedWithAudio({ tempo: 1.25 });

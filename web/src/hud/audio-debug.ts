@@ -71,7 +71,7 @@ export function createAudioDebugSection({
   audio,
   openCalibration,
 }: AudioDebugOptions): HTMLElement {
-  const { engine, piano, accompaniment, samples } = audio;
+  const { engine, piano, accompaniment, backing, samples } = audio;
   const sync = createSyncTest(audio, {
     loadFile: () =>
       loadBackingTrack({
@@ -94,6 +94,7 @@ export function createAudioDebugSection({
     button('Stop all', () => {
       sync.stop();
       accompaniment.stopAll(200);
+      backing.stopAll(200);
       piano.stopAll(200);
     }),
     button('Simulate pause', () => {

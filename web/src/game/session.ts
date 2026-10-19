@@ -547,8 +547,11 @@ export function createGameplaySession({
         if (token === loadToken) chartLoaded = true;
         return loaded;
       });
-      // The recording downloads with the piano; it never fails the load.
-      const backingReady = chartReady.then((loaded) => backing.load(loaded.audio));
+      // The recording downloads with the piano; it never fails the load. A superseded
+      // load stays away from it: the newer load's recording may already be playing.
+      const backingReady = chartReady.then((loaded) =>
+        token === loadToken ? backing.load(loaded.audio) : undefined,
+      );
       Promise.all([chartReady, samples.ready, backingReady]).then(
         ([loaded, { failed }]) => {
           if (token !== loadToken) return;
