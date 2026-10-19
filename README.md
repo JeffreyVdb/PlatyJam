@@ -188,19 +188,21 @@ Everything under `web/src/game/`, drawn by `web/src/scene/game-stage.ts`.
 
 **Outputs:** `state` with a `statechange` event, `stats()` (score, combo, max combo, counts, accuracy, progress, stars; cheap enough to read every frame), `loading` (chart and piano-sample progress), `pauseInfo`, `countdown`, `results` and `error`, plus `judgment` events for feedback.
 
-| State       | Meaning                                                                 |
-| ----------- | ----------------------------------------------------------------------- |
-| `loading`   | Waiting for the chart and the piano samples                             |
-| `ready`     | Show the Start tile                                                     |
-| `starting`  | Start pressed; waiting for audio to run                                 |
-| `leadIn`    | The clock runs below 0 while the first tiles scroll in                  |
-| `playing`   | The song plays                                                          |
-| `paused`    | Song and judgment frozen, sound faded out, hold progress kept           |
-| `countdown` | 3-2-1; lane presses only reclaim interrupted holds                      |
-| `failing`   | Classic failure: the stage shows a short visual rewind, then `finished` |
-| `finished`  | `results` is set (`outcome`: `cleared` or `failed`)                     |
-| `quit`      | The player quit; no results. `start()` begins a new run                 |
-| `error`     | The chart could not be loaded                                           |
+| State       | Meaning                                                                   |
+| ----------- | ------------------------------------------------------------------------- |
+| `loading`   | Waiting for the chart and the piano samples                               |
+| `ready`     | Show the Start tile                                                       |
+| `starting`  | Start pressed; waiting for audio to run                                   |
+| `leadIn`    | The clock runs below 0 while the first tiles scroll in                    |
+| `playing`   | The song plays                                                            |
+| `paused`    | Song and judgment frozen, sound faded out, hold progress kept             |
+| `countdown` | 3-2-1; lane presses only reclaim interrupted holds                        |
+| `failing`   | Classic failure: the stage shows a short visual rewind, then `finished`   |
+| `finished`  | `results` is set (`outcome`: `cleared` or `failed`)                       |
+| `quit`      | The player quit; no results. `start()` begins a new run                   |
+| `error`     | The chart, or a piano note it plays, could not be loaded; reload to retry |
+
+Start needs every pitch the run plays: the selected difficulty's tiles plus the common and that difficulty's accompaniment. If one of them failed to download, the session stops at `error` and the Start screen offers Reload. Missing notes the song never plays only bring up a notice; the song stays playable.
 
 **Results** (`FinalResults`): outcome (and, for a failure, whether a missed tile or an empty tap ended it), song id and title, difficulty, tempo, fail mode, score, accuracy, max combo, Perfect/Good/Miss counts, progress, stars and the Perfect badge.
 

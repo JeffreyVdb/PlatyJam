@@ -52,7 +52,7 @@ export interface SessionConfig extends Omit<SessionSetup, 'chart'> {
  *   playing → failing → finished            (Classic failure, after the visual rewind)
  *   playing → finished                      (song completed)
  *   any run state → quit                    (`quit()`; `start()` begins a new run)
- *   loading → error                         (the chart did not load)
+ *   loading → error                         (the chart or a piano note it needs did not load)
  *
  * `leadIn`, `paused` and `countdown` can also be entered from `leadIn`, and
  * `restart()` goes from any run state (or `finished`) straight back to `starting`.
@@ -77,7 +77,10 @@ export type SessionState =
   | 'finished'
   /** The player quit; nothing is playing. `start()` begins a new run. */
   | 'quit'
-  /** The chart could not be loaded; `error` says why. */
+  /**
+   * The chart, or a piano sample one of its notes needs, could not be loaded;
+   * `error` says why. Start stays unavailable: reloading the page is the way out.
+   */
   | 'error';
 
 /** States in which a run exists (the session owns the clock and pause UI). */
@@ -249,7 +252,7 @@ export interface GameSession {
   readonly countdown: CountdownInfo | undefined;
   /** Once `finished`. */
   readonly results: FinalResults | undefined;
-  /** While `error`. */
+  /** While `error`: a sentence to show the player. */
   readonly error: string | undefined;
   /** Score, combo, accuracy, progress and stars. Cheap; read it every frame. */
   stats(): LiveStats;

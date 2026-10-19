@@ -80,7 +80,12 @@ function resultHeading(results: FinalResults): string {
   return results.failure?.kind === 'emptyTap' ? 'That lane was empty' : 'A note got away';
 }
 
-export function createInterimScreens(root: HTMLElement, session: GameSession): InterimScreens {
+/** `reload` reloads the page: the way out of the `error` state. */
+export function createInterimScreens(
+  root: HTMLElement,
+  session: GameSession,
+  reload: () => void,
+): InterimScreens {
   // ---- Start tile ----
   const start = el('section', 'start-panel');
   start.setAttribute('aria-label', 'Start');
@@ -88,7 +93,8 @@ export function createInterimScreens(root: HTMLElement, session: GameSession): I
   const composer = el('p', 'start-composer');
   const settings = el('p', 'start-settings');
   const startTile = gestureButton('Play', 'primary', () => {
-    session.start();
+    if (session.state === 'error') reload();
+    else session.start();
   });
   startTile.className = 'start-tile';
   const startNote = el('p', 'start-note');
@@ -154,9 +160,9 @@ export function createInterimScreens(root: HTMLElement, session: GameSession): I
         ? `Tuning the piano: ${samples.loaded + samples.failed} of ${samples.total} notes`
         : 'Fetching the song';
     } else if (state === 'error') {
-      startTile.disabled = true;
-      startTile.textContent = 'Unavailable';
-      startNote.textContent = `This song didn't load. ${session.error ?? ''}`.trim();
+      startTile.disabled = false;
+      startTile.textContent = 'Reload';
+      startNote.textContent = session.error ?? "This song didn't load.";
     } else if (state === 'starting') {
       startTile.disabled = true;
       startTile.textContent = 'Starting';
@@ -260,7 +266,9 @@ export function createInterimScreens(root: HTMLElement, session: GameSession): I
       case 'error':
         renderStart();
         show(start);
-        if (state === 'ready' || state === 'quit') startTile.focus({ preventScroll: true });
+        if (state === 'ready' || state === 'quit' || state === 'error') {
+          startTile.focus({ preventScroll: true });
+        }
         break;
       case 'paused':
         renderPause();

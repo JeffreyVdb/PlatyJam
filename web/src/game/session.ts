@@ -1,10 +1,10 @@
 import { createEventBus } from '../app/events';
 import type { Lifecycle } from '../app/lifecycle';
 import type { AudioEngine } from '../audio/engine';
-import type { LoadProgress } from '../audio/piano-samples';
+import type { LoadProgress, PianoSamples } from '../audio/piano-samples';
 import type { PianoVoice, Sampler } from '../audio/sampler';
 import { type Accompaniment, PAUSE_FADE_MS } from '../audio/scheduler';
-import type { Chart } from '../chart/schema';
+import type { Chart, DifficultyName } from '../chart/schema';
 import type { LaneInputSink } from './input';
 import { accuracyOf, earnsPerfectBadge, starsFor } from './scoring';
 import type {
@@ -52,7 +52,10 @@ export interface SessionAudio {
   >;
   piano: Pick<Sampler, 'noteOn' | 'noteOff' | 'stopAll'>;
   accompaniment: Pick<Accompaniment, 'play' | 'pause' | 'stopAll'>;
-  samples: { readonly progress: LoadProgress; readonly ready: Promise<unknown> };
+  samples: {
+    readonly progress: LoadProgress;
+    readonly ready: Promise<Pick<PianoSamples, 'failed'>>;
+  };
 }
 
 export interface GameplaySessionOptions {
@@ -86,6 +89,15 @@ export interface GameplaySession extends GameSession {
   update(): void;
   /** Call after `update()` to get what to draw. */
   view(): StageView;
+}
+
+/** Every pitch a run of `difficulty` plays: its tiles and all the accompaniment. */
+export function requiredPitches(chart: Chart, difficulty: DifficultyName): Set<number> {
+  const { tiles, accompaniment = [] } = chart.difficulties[difficulty];
+  const pitches = new Set<number>();
+  for (const tile of tiles) for (const pitch of tile.pitches) pitches.add(pitch);
+  for (const note of [...chart.accompaniment, ...accompaniment]) pitches.add(note.pitch);
+  return pitches;
 }
 
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
@@ -511,15 +523,23 @@ export function createGameplaySession({
         return loaded;
       });
       Promise.all([chartReady, samples.ready]).then(
-        ([loaded]) => {
+        ([loaded, { failed }]) => {
           if (token !== loadToken) return;
+          const needed = requiredPitches(loaded, rest.difficulty);
+          if (failed.some((pitch) => needed.has(pitch))) {
+            error =
+              "Some piano notes this song needs didn't download. Connect to the internet, then reload.";
+            setState('error');
+            return;
+          }
           config = { ...rest, chart: loaded };
           sim = newSimulation();
           setState('ready');
         },
         (reason: unknown) => {
           if (token !== loadToken) return;
-          error = reason instanceof Error ? reason.message : String(reason);
+          const why = reason instanceof Error ? reason.message : String(reason);
+          error = `This song didn't load. ${why}`.trim();
           setState('error');
         },
       );

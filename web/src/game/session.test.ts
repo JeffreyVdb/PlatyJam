@@ -85,10 +85,10 @@ function fakeAudio() {
     stopAll: vi.fn(),
   };
   const accompaniment = { play: vi.fn(), pause: vi.fn(), stopAll: vi.fn() };
-  let finishSamples = (): void => undefined;
+  let finishSamples: (samples: { failed: number[] }) => void = () => undefined;
   const samples = {
     progress: { loaded: 0, failed: 0, total: 88 },
-    ready: new Promise<void>((resolve) => {
+    ready: new Promise<{ failed: number[] }>((resolve) => {
       finishSamples = resolve;
     }),
   };
@@ -99,8 +99,10 @@ function fakeAudio() {
     piano,
     voices,
     accompaniment,
-    finishSamples: () => {
-      finishSamples();
+    /** Finishes loading the piano; `failed` lists the MIDI notes that did not load. */
+    finishSamples: (failed: number[] = []) => {
+      samples.progress = { loaded: 88 - failed.length, failed: failed.length, total: 88 };
+      finishSamples({ failed });
     },
     /** Moves real time on by `ms`; the song moves by ms × tempo while the clock runs. */
     advance(ms: number) {
@@ -199,6 +201,36 @@ describe('game session', () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(session.state).toBe('error');
       expect(session.error).toContain('HTTP 404');
+    });
+
+    describe('when piano samples failed', () => {
+      // Tiles play 60 and 67/64; the accompaniment plays 48 (common) and 40 (difficulty).
+      const tiles = [tap(500, 0), hold(1000, 1, 500)];
+      const loadWith = async (failed: number[]) => {
+        session.load(setup(tiles));
+        fake.finishSamples(failed);
+        await vi.advanceTimersByTimeAsync(0);
+      };
+
+      it.each([
+        ['every key', Array.from({ length: 88 }, (_, i) => 21 + i)],
+        ['a tile pitch', [64]],
+        ['a common accompaniment pitch', [48]],
+        ["the difficulty's accompaniment pitch", [40]],
+      ])('does not offer Start when %s is missing', async (_name, failed) => {
+        await loadWith(failed);
+        expect(session.state).toBe('error');
+        expect(session.error).toMatch(/piano/i);
+        session.start();
+        expect(session.state).toBe('error');
+      });
+
+      it('offers Start when only notes the song never plays are missing', async () => {
+        await loadWith([21, 61, 108]);
+        expect(session.state).toBe('ready');
+        session.start();
+        expect(session.state).toBe('leadIn');
+      });
     });
 
     it('starts the clock at minus the lead-in, at the tempo, with all the accompaniment', async () => {

@@ -28,7 +28,8 @@ function required(selector: string): HTMLElement {
 
 /**
  * Sound: unlock on the first gesture, the "Tap to resume" overlay, and the piano,
- * which starts loading now. Returns undefined where Web Audio is missing.
+ * which starts loading now. Returns undefined where Web Audio is missing. Piano
+ * notes that failed to load are reported by the game (see `startGame`).
  *
  * `ownsPause` says whether a game run is handling interruptions itself (its pause
  * screen and countdown); the generic overlay then stays out of the way.
@@ -36,7 +37,6 @@ function required(selector: string): HTMLElement {
 function startAudio(
   hudRoot: HTMLElement,
   hud: Hud,
-  reload: () => void,
   ownsPause: () => boolean,
 ): GameAudio | undefined {
   let audio: GameAudio;
@@ -62,15 +62,6 @@ function startAudio(
   engine.events.on('recovered', () => {
     overlay.hide();
   });
-
-  void audio.samples.ready.then(({ failed, buffers }) => {
-    if (failed.length === 0) return;
-    const message =
-      buffers.size === 0
-        ? "The piano sounds didn't download. Connect to the internet, then reload."
-        : `${failed.length} piano notes didn't download. Reload when you're online to get them.`;
-    hud.showProblem(message, 'Reload', reload);
-  });
   return audio;
 }
 
@@ -80,10 +71,16 @@ const NO_GAME = { config: undefined, simulation: undefined, songMs: 0, state: 'l
 /**
  * The game: a session for the song in the query string, lane input on the stage,
  * and the interim screens standing in for PLA-7.
+ *
+ * Missing piano notes: if the song needs one, the session stops at `error` and the
+ * Start screen offers Reload. Otherwise the song is playable, and a notice says
+ * that some other notes are missing.
  */
 function startGame(
   stage: HTMLElement,
   hudRoot: HTMLElement,
+  hud: Hud,
+  reload: () => void,
   audio: GameAudio,
   scene: ReturnType<typeof createGameStage>,
 ): GameplaySession {
@@ -96,7 +93,18 @@ function startGame(
   });
   session.attachInput(input);
   scene.setLaneHeld((lane) => input.isLaneHeld(lane));
-  createInterimScreens(hudRoot, session);
+  createInterimScreens(hudRoot, session, reload);
+  const offReady = session.events.on('statechange', ({ state }) => {
+    if (state !== 'ready') return;
+    offReady();
+    const { failed } = session.loading.samples;
+    if (failed === 0) return;
+    hud.showProblem(
+      `${failed} piano notes didn't download. Reload when you're online to get them.`,
+      'Reload',
+      reload,
+    );
+  });
 
   const { song, ...settings } = setupFromQuery(window.location.search);
   session.load({
@@ -117,9 +125,7 @@ function main() {
   installTouchGuards(stage);
   installPageLifecycle(lifecycle);
   let session: GameplaySession | undefined;
-  const audio = startAudio(hudRoot, hud, reload, () =>
-    session ? isRunActive(session.state) : false,
-  );
+  const audio = startAudio(hudRoot, hud, () => (session ? isRunActive(session.state) : false));
   setupStoragePersistence();
   setupServiceWorker({
     bus: lifecycle,
@@ -160,7 +166,7 @@ function main() {
   });
 
   if (audio) {
-    session = startGame(stage, hudRoot, audio, scene);
+    session = startGame(stage, hudRoot, hud, reload, audio, scene);
   }
 
   watchViewport({
