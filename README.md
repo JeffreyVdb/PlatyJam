@@ -17,7 +17,7 @@ PlatyJam is a musical rhythm game planned for the browser. Follow the beat, hit 
 
 ## Status
 
-`web/` holds the app shell: an offline-capable PWA, the playable game (four lanes of tiles, holds and doubles, judgment, scoring, both fail modes, pause and countdown), the audio engine (game clock, piano sampler, accompaniment scheduler and latency calibration), the chart format with a MIDI-to-chart converter, a starter pack of five songs (one of them generated), and a licence manifest that the credits data is generated from. Menus, song select, settings and the real pause and results screens (PLA-7) come next; until then the game picks its song from the URL and shows small stand-in screens.
+`web/` holds the app shell: an offline-capable PWA, the playable game (four lanes of tiles, holds and doubles, judgment, scoring, both fail modes, pause and countdown), the audio engine (game clock, piano sampler, accompaniment scheduler and latency calibration), the chart format with a MIDI-to-chart converter, a starter pack of five songs (one of them generated) with a song catalog generated from the charts, a licence manifest that the credits data is generated from, and the screens around the game (Home, song select with difficulty and speed, settings, credits, pause and results) with settings and best scores saved on the device. There are no accounts; the Rust server is not started yet.
 
 ## Web app (`web/`)
 
@@ -43,7 +43,7 @@ Run these in `web/`:
 | `pnpm format`        | Prettier write, then ESLint autofix                                                     |
 | `pnpm typecheck`     | `tsc` for the app, service worker, config and scripts projects                          |
 | `pnpm icons`         | Regenerate the app icons from `web/assets-src/`                                         |
-| `pnpm charts`        | Rebuild every song chart (see [Charts](#charts))                                        |
+| `pnpm charts`        | Rebuild every song chart and the song catalog (see [Charts](#charts))                   |
 | `pnpm generate-song` | Rewrite the MIDI of each generated song (see [The song generator](#the-song-generator)) |
 | `pnpm credits`       | Regenerate the credits data from the licence manifest (see [Credits](#credits))         |
 
@@ -53,7 +53,8 @@ The build is served from `/PlatyJam/` (the GitHub Pages project site). Set `BASE
 
 - `src/main.ts` wires the modules together; the platform logic sits in small modules under `src/app/` (lifecycle events, viewport sizing, touch guards, storage, service worker registration, the `?debug` hook).
 - `src/render/renderer-host.ts` owns the canvas, the WebGL renderer, the render loop and context-loss recovery.
-- `src/game/` is gameplay: the session contract, the simulation, judgment and scoring, lane input and the session controller (see [The game](#the-game)). `src/scene/` is the three.js stage. `src/hud/` is the HTML layer above it: the play HUD, the interim start, pause, countdown and results screens, the "Tap to resume" overlay and the `?debug` Audio tools.
+- `src/game/` is gameplay: the session contract, the simulation, judgment and scoring, lane input and the session controller (see [The game](#the-game)). `src/scene/` is the three.js stage. `src/hud/` is the HTML layer above it: the play HUD, notices, the "Tap to resume" overlay and the `?debug` Audio tools.
+- `src/menus/` is the screens around the game (see [The menus](#the-menus)): Home, song select, settings, credits, pause, countdown and results, with the navigation rules in `flow.ts`. `src/save/` is the saved settings and best scores (see [Saved data](#saved-data)). `src/catalog/` is the song catalog song select reads: its schema and `catalog.json`, which `pnpm charts` generates.
 - `src/audio/` is the audio engine (see [Audio](#audio)); `src/calibration/` is the latency calibration overlay.
 - `src/chart/` is the chart format: the schema shared with the converter (`schema.ts`) and `loadChart()` (`load.ts`).
 - `scripts/midi-to-chart.ts` and `scripts/charts/` are the MIDI-to-chart converter; `songs-src/` holds the song sources and `public/songs/` the generated charts.
@@ -88,18 +89,19 @@ Wrap storage writes in the guard from `createStorageGuard()` (`src/app/storage.t
 
 Everything under `web/src/audio/`. The pure maths has no Web Audio imports and is unit-tested; only `engine.ts`, `sampler.ts`, `click.ts` and `backing-track.ts` touch Web Audio objects.
 
-| Module             | What it does                                                                                                                 |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| `engine.ts`        | Owns the one `AudioContext` and master gain: unlock, `audioSession`, interruptions, recreation, the song clock               |
-| `clock.ts`         | The song clock: context time to song time, with start offset, pause, resume and tempo                                        |
-| `output-time.ts`   | Maps a `performance.now()` time (an `event.timeStamp`) to context time with `getOutputTimestamp()`                           |
-| `timeline.ts`      | The clock plus calibrated offsets: `songTime()`, `judgeSongTime()`, `startTimeFor()`                                         |
-| `sampler.ts`       | Piano voices: `noteOn` / `noteOff`, velocity curve, release envelope, 48-voice cap                                           |
-| `piano-samples.ts` | Loads the 88 FluidR3 MP3s with `fetch` and `decodeAudioData`, six at a time                                                  |
-| `scheduler.ts`     | Look-ahead accompaniment (25 ms tick, 100 ms horizon) and the `AccompanimentNote` type charts use                            |
-| `backing-track.ts` | An optional audio file: `loadBackingTrack()` fetches and decodes it, `createBackingTrack()` starts it in sync with the clock |
-| `calibration*.ts`  | Calibration statistics, and saving the offsets                                                                               |
-| `game-audio.ts`    | Wires engine, piano and accompaniment together; `main.ts` calls it                                                           |
+| Module             | What it does                                                                                                                                                                 |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `engine.ts`        | Owns the one `AudioContext` and master gain (with the master volume): unlock, `audioSession`, interruptions, recreation, the song clock                                      |
+| `clock.ts`         | The song clock: context time to song time, with start offset, pause, resume and tempo                                                                                        |
+| `output-time.ts`   | Maps a `performance.now()` time (an `event.timeStamp`) to context time with `getOutputTimestamp()`                                                                           |
+| `timeline.ts`      | The clock plus calibrated offsets: `songTime()`, `judgeSongTime()`, `startTimeFor()`                                                                                         |
+| `sampler.ts`       | Piano voices: `noteOn` / `noteOff`, velocity curve, release envelope, 48-voice cap                                                                                           |
+| `piano-samples.ts` | Loads the 88 FluidR3 MP3s with `fetch` and `decodeAudioData`, six at a time                                                                                                  |
+| `scheduler.ts`     | Look-ahead accompaniment (25 ms tick, 100 ms horizon) and the `AccompanimentNote` type charts use                                                                            |
+| `backing-track.ts` | An optional audio file: `loadBackingTrack()` fetches and decodes it, `createBackingTrack()` starts it in sync with the clock                                                 |
+| `calibration*.ts`  | Calibration statistics, and saving the offsets                                                                                                                               |
+| `submix.ts`        | A group of voices with its own volume: a gain into the master, rebuilt when the context is recreated                                                                         |
+| `game-audio.ts`    | Wires engine, pianos and accompaniment together: the player's piano plays into the master, the accompaniment's own piano (same samples) through a submix; `main.ts` calls it |
 
 ### Time model
 
@@ -117,7 +119,7 @@ All offsets are real-time ms (never scaled by tempo), and **positive means late*
 - **I**, the input offset: a tap reaches the page I ms after it happened. Taps are judged at `event.timeStamp − I`.
 - Visual latency is assumed to be 0 and is folded into I.
 
-The calibration (`openCalibration()` in `src/calibration/`, opened from **Calibrate** in `?debug` until PLA-7's settings screen exists) runs two tap-along rounds at 100 BPM: a 4-beat count-in, then 16 scored beats. **Watch** has flashes and no sound, and gives P_seen. **Listen** has clicks and no moving visuals, and gives P_heard. It drops the first 4 scored taps and taps more than 120 ms off, needs at least 8 taps, and takes the median. If the spread (IQR) is over 60 ms it asks for a retry. Then `I = P_seen` and `A = P_heard − P_seen`, clamped to −150…+250 ms and −150…+400 ms. Both rounds use the gameplay clock, scheduler and `judgeSongTime` with the offsets at zero, so any bias in that pipeline is measured too. The result is saved as `{ version: 1, audioOffsetMs, inputOffsetMs, calibratedAt }` under the `localStorage` key `platyjam.calibration.v1` and loaded at startup; missing or corrupt data reads as zeros.
+The calibration (`openCalibration()` in `src/calibration/`, opened from **Calibrate timing** in Settings, and from **Calibrate** in the `?debug` panel) runs two tap-along rounds at 100 BPM: a 4-beat count-in, then 16 scored beats. **Watch** has flashes and no sound, and gives P_seen. **Listen** has clicks and no moving visuals, and gives P_heard. It drops the first 4 scored taps and taps more than 120 ms off, needs at least 8 taps, and takes the median. If the spread (IQR) is over 60 ms it asks for a retry. Then `I = P_seen` and `A = P_heard − P_seen`, clamped to −150…+250 ms and −150…+400 ms. Both rounds use the gameplay clock, scheduler and `judgeSongTime` with the offsets at zero, so any bias in that pipeline is measured too. The result is saved as `{ version: 1, audioOffsetMs, inputOffsetMs, calibratedAt }` under the `localStorage` key `platyjam.calibration.v1` (see [Saved data](#saved-data)) and loaded at startup; missing or corrupt data reads as zeros.
 
 ### Engine events
 
@@ -188,21 +190,21 @@ Everything under `web/src/game/`, drawn by `web/src/scene/game-stage.ts`.
 
 **Outputs:** `state` with a `statechange` event, `stats()` (score, combo, max combo, counts, accuracy, progress, stars; cheap enough to read every frame), `loading` (chart and piano-sample progress), `pauseInfo`, `countdown`, `results` and `error`, plus `judgment` events for feedback.
 
-| State       | Meaning                                                                   |
-| ----------- | ------------------------------------------------------------------------- |
-| `loading`   | Waiting for the chart and the piano samples                               |
-| `ready`     | Show the Start tile                                                       |
-| `starting`  | Start pressed; waiting for audio to run                                   |
-| `leadIn`    | The clock runs below 0 while the first tiles scroll in                    |
-| `playing`   | The song plays                                                            |
-| `paused`    | Song and judgment frozen, sound faded out, hold progress kept             |
-| `countdown` | 3-2-1; lane presses only reclaim interrupted holds                        |
-| `failing`   | Classic failure: the stage shows a short visual rewind, then `finished`   |
-| `finished`  | `results` is set (`outcome`: `cleared` or `failed`)                       |
-| `quit`      | The player quit; no results. `start()` begins a new run                   |
-| `error`     | The chart, or a piano note it plays, could not be loaded; reload to retry |
+| State       | Meaning                                                                  |
+| ----------- | ------------------------------------------------------------------------ |
+| `loading`   | Waiting for the chart and the piano samples                              |
+| `ready`     | Show the Play tile                                                       |
+| `starting`  | Start pressed; waiting for audio to run                                  |
+| `leadIn`    | The clock runs below 0 while the first tiles scroll in                   |
+| `playing`   | The song plays                                                           |
+| `paused`    | Song and judgment frozen, sound faded out, hold progress kept            |
+| `countdown` | 3-2-1; lane presses only reclaim interrupted holds                       |
+| `failing`   | Classic failure: the stage shows a short visual rewind, then `finished`  |
+| `finished`  | `results` is set (`outcome`: `cleared` or `failed`)                      |
+| `quit`      | The player quit; no results. `start()` begins a new run                  |
+| `error`     | The chart, or a piano note it plays, could not be loaded; `load()` again |
 
-Start needs every pitch the run plays: the selected difficulty's tiles plus the common and that difficulty's accompaniment. If one of them failed to download, the session stops at `error` and the Start screen offers Reload. Missing notes the song never plays only bring up a notice; the song stays playable.
+Start needs every pitch the run plays: the selected difficulty's tiles plus the common and that difficulty's accompaniment. If one of them failed to download, the session stops at `error` and the Play tile offers Reload (the piano samples only load at launch). Missing notes the song never plays only bring up a notice; the song stays playable.
 
 **Results** (`FinalResults`): outcome (and, for a failure, whether a missed tile or an empty tap ended it), song id and title, difficulty, tempo, fail mode, score, accuracy, max combo, Perfect/Good/Miss counts, progress, stars and the Perfect badge.
 
@@ -236,23 +238,42 @@ The rules live in `simulation.ts`, `judgment.ts` and `scoring.ts`: pure code wit
 - A cancelled touch (a system gesture, palm rejection, a rotation that drops the touch) pauses the run without penalty, as does the window losing focus. A rotation that keeps the touches keeps the run: held tiles stay bound by pointer id and the lanes refit.
 - Pausing forgets every held input, so a finger still on the glass does nothing until it lifts and presses again (during the countdown, to reclaim a hold).
 
-### Playing it now (before PLA-7)
+### The menus
 
-`src/hud/interim-screens.ts` stands in for PLA-7's screens: the Start tile, the pause menu, the countdown and the results. It uses only the session contract. The song and settings come from the URL; anything missing or invalid falls back to its default:
+`src/menus/` holds the screens around the game. They drive the session only through `GameSession` and live in the HUD layer, an HTML overlay above the canvas. Every screen works in portrait and landscape, keeps its controls at least 44 px, and stays inside the safe areas.
 
-| Parameter    | Values                                                                                                                       | Default               |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------- | --------------------- |
-| `song`       | a chart id: `andre-sonatine`, `beethoven-fur-elise`, `beethoven-pathetique-rondo`, `billabong-morning`, `satie-gymnopedie-1` | `beethoven-fur-elise` |
-| `difficulty` | `easy`, `normal`, `hard`                                                                                                     | `normal`              |
-| `tempo`      | `0.75`, `1`, `1.25`, `1.5`                                                                                                   | `1`                   |
-| `fail`       | `classic`, `relaxed`                                                                                                         | `classic`             |
-| `scroll`     | real ms a tile is visible, 600–4000                                                                                          | `1600`                |
+- **Home:** the title and **Tap to play**. A tap anywhere (or Enter, Space) opens the songs; that first tap also unlocks the audio.
+- **Songs:** the catalog, gentlest first. Easy / Normal / Hard tabs pick the difficulty, and each song shows its best stars and score for that difficulty at the chosen speed. The panel has the speed (0.75× to 1.5×) and the **Play** tile. Every song is unlocked. Picking a song, difficulty or speed calls `load()` at once, so the chart and piano load while the player chooses; a chart already downloaded is reused. Play calls `start()` inside the tap. While the song loads it shows progress, and the next tap after that starts it. A chart that did not download offers **Try again** (offline, it says the song is not on the device yet), and the rest of the list still works. Missing piano notes offer **Reload**.
+- **Settings** (from Songs): fail mode (Classic / Relaxed) and tile speed apply from the next run; Volume and Accompaniment change the sound at once. **Calibrate timing** opens the latency calibration and returns to Settings.
+- **Credits** (from Songs): every entry of `src/credits/credits.json`, with its licence and source as links that open outside the game.
+- **Pause:** the HUD button, or automatically on backgrounding, an audio interruption, a cancelled touch or lost focus. **Resume** brings the sound back if needed (it asks for one more tap when the first did not), then counts 3-2-1 over the lanes; the countdown lets touches through, so held lanes can be reclaimed. **Restart** and **Quit** (to the songs) are there too.
+- **Results:** cleared or failed, score, stars, accuracy, max combo, Perfect / Good / Miss, and **New best!** when the run beat the saved best for that song, difficulty and speed (a failed run counts). **Retry** or **Song list**.
 
-For example `?song=beethoven-pathetique-rondo&difficulty=hard&tempo=1.5`. Play starts with the Start tile (or Enter or Space) once the chart and the piano have loaded. Escape pauses and resumes. Lanes are D F J K, a mouse click, or touch.
+Keys: Enter is the screen's main action (Home → Songs, Play, Retry, Resume); Escape goes back (Settings and Credits → Songs → Home), pauses and resumes during a run, and leaves the results for the songs. Lanes are D F J K, a mouse click, or touch. Overlays are plain elements: the stage underneath is `inert`, and focus moves to each screen's heading or main button. Escape is desktop-only; every screen also has an on-screen way back. `prefers-reduced-motion` turns off the entrance and celebration animations.
+
+Outside a run, an audio interruption still shows the "Tap to resume" overlay over the menus.
+
+### Saved data
+
+Settings and best scores are saved on the device in `localStorage`. There are no accounts. `src/save/save-store.ts` lists every key:
+
+| Key                       | Written by                       | Holds                                                        |
+| ------------------------- | -------------------------------- | ------------------------------------------------------------ |
+| `platyjam.save.v1`        | `src/save/save-store.ts`         | `{ version: 1, settings, bests }`                            |
+| `platyjam.calibration.v1` | `src/audio/calibration-store.ts` | `{ version: 1, audioOffsetMs, inputOffsetMs, calibratedAt }` |
+
+- `settings`: `failMode`, `scrollDurationMs`, `tempo` (the speed picked on song select), `masterVolume` and `accompanimentVolume` (0 to 1), and the last `songId` and `difficulty`.
+- `bests`: keyed `<songId>/<difficulty>/<tempo>`, e.g. `beethoven-fur-elise/hard/1.25`, each `{ score, stars, accuracy, maxCombo, perfectBadge, achievedAt }`: the score, accuracy and max combo of the highest-scoring run, the most stars any run earned, whether any run earned the Perfect badge, and when the best score was set (ISO 8601). "New best!" means the run's score beat the saved one (a first run must score above 0); it is decided before saving.
+- **Writing:** every change is saved at once, and again on the lifecycle `pause`.
+- **Versioning:** the schema version is in both the key and the record. A new shape gets a new version and key, and `parseSave()` (`src/save/save-data.ts`) migrates the older record into it. A record from an unknown version reads as the defaults; a broken field resets only itself, and a broken best score is dropped. Nothing in the save throws during startup.
+- **When storage fails** (blocked, private mode, full): the game keeps the save in memory for the session and says once that progress won't be saved.
+- **Durability on iPad:** a Home Screen app's storage is its own, separate from Safari's. WebKit may delete script-written storage after seven days of use without opening the app, so scores can be lost if PlatyJam is not played for a while. The app asks for persistent storage when it runs installed (`navigator.storage.persist()`) and logs the answer, but WebKit grants it by heuristics and nothing depends on it.
 
 ## Charts
 
 A chart is one JSON file per song, `web/public/songs/<id>.json`, served from `<base>songs/<id>.json` and cached at runtime like other songs. `pnpm charts` generates them from MIDI files; nobody edits them by hand.
+
+`pnpm charts` also writes the song catalog, `src/catalog/catalog.json`, from every chart in `public/songs/`: each song's id, title, composer, arranger, duration, BPM, and tile count and notes per second per difficulty, the gentlest song (by Normal notes per second) first. Song select reads it, so it lists the songs offline without downloading a chart; it is bundled with the app shell. Nobody edits it by hand, and a test fails when it is out of date.
 
 The game loads one with `loadChart(url)` from `src/chart/load.ts`: it fetches the file and validates it with `parseChart()`, which throws an `Error` listing every problem. The schema (`src/chart/schema.ts`, zod/mini) and the types inferred from it (`Chart`, `Tile`, `Note`) are shared by the game and the converter.
 
@@ -335,7 +356,7 @@ andre-sonatine: andre-sonatine.mid → public/songs/andre-sonatine.json (95.8 s)
    Unknown fields are errors, so a typo does not go unnoticed. Run `pnpm charts <id>` once: it lists the file's tracks (index, name, channel, notes) so you can pick the melody, also when the selection matches nothing.
 
 4. **Build:** `pnpm charts` rebuilds every song (`pnpm charts <id>` only that one). Check the notes per second it prints: each difficulty should be clearly easier than the next. Tune `difficulties` in `song.json` if not.
-5. **Credit it:** add a song entry to `assets/LICENSES.json` (the same title, composer, arranger and `license` fields as `song.json`, plus `modifications`, `retrieved`, `nonCommercial` and `paths`), run `pnpm credits`, and add the song to the table in [Credits](#credits). Commit the source directory, `public/songs/<id>.json`, the manifest and `src/credits/credits.json` together. `pnpm test` fails if the manifest and the song disagree.
+5. **Credit it:** add a song entry to `assets/LICENSES.json` (the same title, composer, arranger and `license` fields as `song.json`, plus `modifications`, `retrieved`, `nonCommercial` and `paths`), run `pnpm credits`, and add the song to the table in [Credits](#credits). Commit the source directory, `public/songs/<id>.json`, `src/catalog/catalog.json`, the manifest and `src/credits/credits.json` together. `pnpm test` fails if the manifest and the song disagree.
 
 ### The song generator
 
@@ -366,12 +387,23 @@ GitHub Pages serves `main` at https://jeffreyvdb.github.io/PlatyJam/.
 
 ### Gameplay on an iPad
 
-Open the Home Screen app with `?debug&song=beethoven-pathetique-rondo&difficulty=hard&tempo=1.5` (the stress case) and play it through.
+Open the Home Screen app with `?debug`, pick Piano Sonata No. 8 "Pathétique" on Hard at 1.5× (the stress case) and play it through.
 
 1. **Performance (open).** The target is a steady 60 fps for the whole song. The debug panel's first line shows the frame rate; Low Power Mode caps Safari at 30 fps, so turn it off. Record the iPad model, the iPadOS and Safari versions, and the measured frame rate on PLA-6. This has not been measured yet.
 2. **Multi-touch.** Doubles with two fingers landing together both count; holds stay bound to their finger when it slides into another lane.
 3. **Pause and resume.** Hold a tile, then switch apps and come back: the pause menu shows; Resume brings the sound back, then counts 3-2-1 with the song still. Put the finger back on the held lane during the count to keep the hold.
 4. **Rotation.** Rotate mid-song: the lanes refit and play goes on, or it pauses if iPadOS cancelled the touches.
+
+### Menus on an iPad
+
+Check each in portrait and landscape, and once in Split View.
+
+1. **The whole loop by touch.** Force-quit, then launch: Home → **Tap to play** → pick a song, a difficulty and a speed → **Play** → results → **Retry**. The first tap should also start the sound (no silent first song).
+2. **Scrolling the list.** Scroll the songs by dragging on a row: the list scrolls, the page does not bounce, and no row is picked by the drag.
+3. **Sliders.** Drag Volume and Accompaniment in Settings, also after tapping one (WebKit bug 266283 affects native range inputs; these are custom). The accompaniment should get quieter while your own notes do not.
+4. **Saved progress.** Finish a song, change the speed and a setting, force-quit and relaunch, in Airplane Mode: the best score, speed and setting are still there.
+5. **Background mid-song.** Switch apps during a song and come back: the pause screen shows; **Resume** counts 3-2-1.
+6. **Credits.** Tap a licence link: it opens outside the game, and PlatyJam is still where you left it.
 
 ### Audio on an iPad
 
@@ -381,4 +413,4 @@ Use the Home Screen app opened with `?debug`. The **Audio** section of the debug
 2. **Background and return.** Start the sync test, then switch to another app and back. Expect Now Playing / lock-screen controls while it plays. On return the game shows **Paused**; tap once and the music continues from where it stopped. If it asks to tap again, tap: `context recreated` should go up by one and the sound should come back. It should never stay silent. **Simulate pause** and **Simulate stuck pause** run the same paths without leaving the app.
 3. **3-minute sync.** Start the sync test at 1× (120 BPM piano metronome and chords for 3 minutes). The dot should flash exactly with each click to the end, `skipped late` should stay at 0, and `clock drift` and `output lag` should stay roughly constant. Repeat at 0.75× and 1.5×.
 4. **Tap-to-sound latency.** Use the built-in speakers at full volume. Film the iPad from the side in slow motion (240 fps) while tapping the **Tap pad** with a fingernail, so the tap is audible. Step through the video: the latency is the time from the fingertip touching the glass to the start of the piano note in the audio track (count frames, about 4.2 ms each at 240 fps). Take the median of 10 taps and record it on PLA-3.
-5. **Calibration persistence.** Tap **Calibrate**, complete both rounds and **Save**. Force-quit the app and relaunch it: the panel's **Calibration** line still shows the saved values.
+5. **Calibration persistence.** Tap **Calibrate** (or **Calibrate timing** in Settings), complete both rounds and **Save**. Force-quit the app and relaunch it: the panel's **Calibration** line still shows the saved values.

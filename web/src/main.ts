@@ -7,17 +7,22 @@ import { installTouchGuards } from './app/touch-guards';
 import { watchViewport } from './app/viewport';
 import { createGameAudio, type GameAudio } from './audio/game-audio';
 import { openCalibration } from './calibration/calibration-overlay';
+import catalogJson from './catalog/catalog.json';
+import { parseCatalog } from './catalog/schema';
 import { loadChart } from './chart/load';
+import creditsJson from './credits/credits.json';
+import { parseCredits } from './credits/schema';
 import { installLaneInput } from './game/input';
 import { createGameplaySession, type GameplaySession } from './game/session';
 import { isRunActive } from './game/session-contract';
-import { setupFromQuery } from './game/url-setup';
 import { createAudioDebugSection } from './hud/audio-debug';
 import { createHud, type Hud } from './hud/hud';
-import { createInterimScreens } from './hud/interim-screens';
 import { createPlayHud } from './hud/play-hud';
 import { createResumeOverlay } from './hud/resume-overlay';
+import { createChartCache } from './menus/chart-cache';
+import { createMenus } from './menus/menus';
 import { createRendererHost, type RendererHost } from './render/renderer-host';
+import { createSaveStore, type SaveStore } from './save/save-store';
 import { createGameStage } from './scene/game-stage';
 
 function required(selector: string): HTMLElement {
@@ -69,11 +74,32 @@ function startAudio(
 const NO_GAME = { config: undefined, simulation: undefined, songMs: 0, state: 'loading' } as const;
 
 /**
- * The game: a session for the song in the query string, lane input on the stage,
- * and the interim screens standing in for PLA-7.
+ * Opens the latency calibration over the HUD and reports the result as a notice.
+ * Settings opens it, and so does `?debug`.
+ */
+function calibrator(hudRoot: HTMLElement, hud: Hud, audio: GameAudio) {
+  return (onClose?: () => void) => {
+    openCalibration({
+      root: hudRoot,
+      engine: audio.engine,
+      onSaved: ({ audioOffsetMs, inputOffsetMs }, persisted) => {
+        hud.showNotice(
+          persisted
+            ? `Timing saved: sound ${audioOffsetMs} ms, touch ${inputOffsetMs} ms.`
+            : "Timing applied, but this device wouldn't save it. It resets when PlatyJam closes.",
+        );
+      },
+      onClose,
+    });
+  };
+}
+
+/**
+ * The game: a session, lane input on the stage, and the menus around it (Home,
+ * song select, settings, credits, pause, countdown, results).
  *
- * Missing piano notes: if the song needs one, the session stops at `error` and the
- * Start screen offers Reload. Otherwise the song is playable, and a notice says
+ * Missing piano notes: if the chosen song needs one, the session stops at `error`
+ * and the Play tile offers Reload. Otherwise the song is playable, and a notice says
  * that some other notes are missing.
  */
 function startGame(
@@ -83,6 +109,7 @@ function startGame(
   reload: () => void,
   audio: GameAudio,
   scene: ReturnType<typeof createGameStage>,
+  store: SaveStore,
 ): GameplaySession {
   const session = createGameplaySession({ audio, bus: lifecycle });
   const input = installLaneInput({
@@ -93,12 +120,17 @@ function startGame(
   });
   session.attachInput(input);
   scene.setLaneHeld((lane) => input.isLaneHeld(lane));
-  createInterimScreens(hudRoot, session, reload);
-  const offReady = session.events.on('statechange', ({ state }) => {
-    if (state !== 'ready') return;
-    offReady();
+
+  const { masterVolume, accompanimentVolume } = store.settings;
+  audio.engine.setMasterVolume(masterVolume);
+  audio.setAccompanimentVolume(accompanimentVolume);
+
+  let warnedSamples = false;
+  session.events.on('statechange', ({ state }) => {
+    if (state !== 'ready' || warnedSamples) return;
     const { failed } = session.loading.samples;
     if (failed === 0) return;
+    warnedSamples = true;
     hud.showProblem(
       `${failed} piano notes didn't download. Reload when you're online to get them.`,
       'Reload',
@@ -106,10 +138,23 @@ function startGame(
     );
   });
 
-  const { song, ...settings } = setupFromQuery(window.location.search);
-  session.load({
-    ...settings,
-    chart: loadChart(`${import.meta.env.BASE_URL}songs/${song}.json`),
+  const charts = createChartCache((id) => loadChart(`${import.meta.env.BASE_URL}songs/${id}.json`));
+  const calibrate = calibrator(hudRoot, hud, audio);
+  createMenus({
+    root: hudRoot,
+    stage,
+    session,
+    store,
+    songs: parseCatalog(catalogJson).songs,
+    credits: parseCredits(creditsJson),
+    charts,
+    setVolume: (kind, volume) => {
+      if (kind === 'masterVolume') audio.engine.setMasterVolume(volume);
+      else audio.setAccompanimentVolume(volume);
+    },
+    offsets: () => audio.engine.offsets,
+    openCalibration: calibrate,
+    reload,
   });
   return session;
 }
@@ -124,9 +169,25 @@ function main() {
 
   installTouchGuards(stage);
   installPageLifecycle(lifecycle);
+  const store = createSaveStore({
+    onUnavailable: () => {
+      hud.showNotice(
+        "This device isn't saving progress, so scores and settings reset when PlatyJam closes.",
+        8000,
+      );
+    },
+  });
+  // Every change is written at once; this catches a write that failed earlier.
+  lifecycle.on('pause', () => {
+    store.flush();
+  });
   let session: GameplaySession | undefined;
   const audio = startAudio(hudRoot, hud, () => (session ? isRunActive(session.state) : false));
-  setupStoragePersistence();
+  setupStoragePersistence({
+    onResult: (persisted) => {
+      console.info(`[platyjam] persistent storage ${persisted ? 'granted' : 'not granted'}`);
+    },
+  });
   setupServiceWorker({
     bus: lifecycle,
     onUpdateReady: (apply) => {
@@ -166,7 +227,7 @@ function main() {
   });
 
   if (audio) {
-    session = startGame(stage, hudRoot, hud, reload, audio, scene);
+    session = startGame(stage, hudRoot, hud, reload, audio, scene, store);
   }
 
   watchViewport({
@@ -202,20 +263,15 @@ function main() {
     hook.session = session;
     if (audio) {
       hook.audio = audio;
-      const calibrate = () => {
-        openCalibration({
-          root: hudRoot,
-          engine: audio.engine,
-          onSaved: ({ audioOffsetMs, inputOffsetMs }, persisted) => {
-            hud.showNotice(
-              persisted
-                ? `Timing saved: sound ${audioOffsetMs} ms, touch ${inputOffsetMs} ms.`
-                : "Timing applied, but this device wouldn't save it. It resets when PlatyJam closes.",
-            );
+      const calibrate = calibrator(hudRoot, hud, audio);
+      sections.push(
+        createAudioDebugSection({
+          audio,
+          openCalibration: () => {
+            calibrate();
           },
-        });
-      };
-      sections.push(createAudioDebugSection({ audio, openCalibration: calibrate }));
+        }),
+      );
     }
     hud.showDebugPanel(hook, sections);
   }

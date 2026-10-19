@@ -17,7 +17,8 @@ export const RESUME_TIMEOUT_MS = 300;
 /** After resuming, `currentTime` must move within this window (WebKit 263627). */
 export const ADVANCE_PROBE_MS = 100;
 
-const MASTER_GAIN = 0.8;
+/** The master gain at full volume: headroom for chords of many voices. */
+export const MASTER_GAIN = 0.8;
 
 export type EnginePhase =
   /** The context has never run: waiting for the first user gesture. */
@@ -92,6 +93,9 @@ export interface AudioEngine {
   readonly timeline: Timeline;
   readonly offsets: Readonly<LatencyOffsets>;
   setOffsets(offsets: LatencyOffsets): void;
+  /** 0 to 1, scaling the master gain. Kept when the context is recreated. */
+  readonly masterVolume: number;
+  setMasterVolume(volume: number): void;
   /** Maps a performance.now()-based time to the context time audible then. */
   contextTimeAt(perfMs: number): number;
   /** Starts audio on the first user gesture. Returns a function that removes the listeners. */
@@ -187,6 +191,7 @@ export function createAudioEngine({
   // Whether the context was recreated since the clock last resumed, for `resumed`.
   let recreatedSinceResume = false;
   let offsets: LatencyOffsets = { ...ZERO_OFFSETS };
+  let masterVolume = 1;
   let removeUnlock = noop;
   let unlockedBy: string | undefined;
   const unlockAttempts: Record<string, number> = {};
@@ -224,7 +229,7 @@ export function createAudioEngine({
     ctx = createContext();
     ctx.addEventListener('statechange', onStateChange);
     output = ctx.createGain();
-    output.gain.value = MASTER_GAIN;
+    output.gain.value = MASTER_GAIN * masterVolume;
     output.connect(ctx.destination);
   };
 
@@ -322,6 +327,13 @@ export function createAudioEngine({
     },
     setOffsets(next) {
       offsets = clampOffsets(next);
+    },
+    get masterVolume() {
+      return masterVolume;
+    },
+    setMasterVolume(volume) {
+      masterVolume = Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 0;
+      output.gain.value = MASTER_GAIN * masterVolume;
     },
     contextTimeAt: mapToContext,
 

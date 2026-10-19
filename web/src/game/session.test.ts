@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEventBus } from '../app/events';
-import { createLifecycle } from '../app/lifecycle';
+import { createLifecycle, type Lifecycle } from '../app/lifecycle';
 import type { AudioEngineEvents, EnginePhase } from '../audio/engine';
 import { createSongClock } from '../audio/clock';
 import { createTimeline } from '../audio/timeline';
+import { PAUSE_FADE_MS } from '../audio/scheduler';
 import type { Chart, Tile } from '../chart/schema';
 import {
   COUNTDOWN_BEAT_MS,
@@ -130,14 +131,16 @@ describe('game session', () => {
   let fake: ReturnType<typeof fakeAudio>;
   let states: SessionState[];
   let session: ReturnType<typeof createGameplaySession>;
+  let bus: Lifecycle;
   let cleared: number;
 
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     fake = fakeAudio();
+    bus = createLifecycle();
     session = createGameplaySession({
       audio: fake.audio,
-      bus: createLifecycle(),
+      bus,
       now: () => fake.perf,
     });
     states = [];
@@ -470,6 +473,54 @@ describe('game session', () => {
       expect(fake.engine.clock.isRunning).toBe(true);
       expect(session.state).toBe('playing');
       expect(songMs()).toBe(held);
+    });
+
+    // The player's piano is not the accompaniment's: pausing the song alone left a
+    // held note ringing into the pause screen.
+    it.each([
+      [
+        'the Pause button',
+        () => {
+          session.pause();
+        },
+      ],
+      [
+        'a lost focus',
+        () => {
+          session.input.blur();
+        },
+      ],
+      [
+        'a cancelled touch',
+        () => {
+          session.input.cancel();
+        },
+      ],
+      [
+        'the page going to the background',
+        () => {
+          bus.emit('pause', { reason: 'hidden' });
+        },
+      ],
+      [
+        'an audio interruption',
+        () => {
+          fake.engine.phase = 'interrupted';
+          fake.engine.timeline.pause();
+          fake.engine.events.emit('interrupted', { reason: 'background' });
+        },
+      ],
+    ])("fades the player's notes with the song on %s", async (_, pause) => {
+      await loaded([hold(1000, 1, 2000), tap(4000, 0)]);
+      session.start();
+      frames(2000);
+      press('a', 1);
+      expect(fake.voices).toEqual([{ pitch: 67 }, { pitch: 64 }]);
+      fake.piano.stopAll.mockClear();
+      pause();
+      expect(session.state).toBe('paused');
+      expect(fake.accompaniment.pause).toHaveBeenCalledWith(PAUSE_FADE_MS);
+      expect(fake.piano.stopAll).toHaveBeenCalledWith(PAUSE_FADE_MS);
     });
 
     it('recovers interrupted audio while the clock stays paused, then counts down', async () => {

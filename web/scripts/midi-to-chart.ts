@@ -1,16 +1,20 @@
 // Builds every song in songs-src/ into public/songs/<id>.json. Run: pnpm charts [id…]
 //
 // Each songs-src/<id>/ holds a MIDI file and a song.json (see README, "Adding a song").
-// A chart is validated before it is written; any failure exits non-zero.
+// A chart is validated before it is written; any failure exits non-zero. Then the song
+// catalog, src/catalog/catalog.json, is rebuilt from every chart in public/songs/ (also
+// after `pnpm charts <id>`); a test fails while it is out of date.
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { DIFFICULTIES } from '../src/chart/schema.ts';
+import { DIFFICULTIES, parseChart } from '../src/chart/schema.ts';
+import { buildCatalog, formatCatalog } from './charts/catalog.ts';
 import { parseSongConfig } from './charts/config.ts';
 import { convertMidi } from './charts/convert.ts';
 import { formatJson } from './charts/serialize.ts';
 
 const SOURCES = fileURLToPath(new URL('../songs-src/', import.meta.url));
 const OUT = fileURLToPath(new URL('../public/songs/', import.meta.url));
+const CATALOG = fileURLToPath(new URL('../src/catalog/catalog.json', import.meta.url));
 
 async function buildSong(id: string): Promise<void> {
   const dir = `${SOURCES}${id}/`;
@@ -34,6 +38,16 @@ async function buildSong(id: string): Promise<void> {
       `  ${name.padEnd(6)} ${String(s.tiles).padStart(4)} tiles, ${String(s.holds).padStart(3)} holds, ${String(s.doubles).padStart(3)} doubles, ${s.nps.toFixed(2)} notes/s`,
     );
   }
+}
+
+async function writeCatalog(): Promise<void> {
+  const files = (await readdir(OUT)).filter((name) => name.endsWith('.json'));
+  const charts = await Promise.all(
+    files.map(async (name) => parseChart(JSON.parse(await readFile(`${OUT}${name}`, 'utf8')))),
+  );
+  const catalog = buildCatalog(charts);
+  await writeFile(CATALOG, formatCatalog(catalog));
+  console.log(`public/songs/ → src/catalog/catalog.json (${catalog.songs.length} songs)`);
 }
 
 async function findMidi(dir: string): Promise<string> {
@@ -67,7 +81,13 @@ for (const id of requested.length > 0 ? requested : available) {
     console.error(`${id}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
+try {
+  await writeCatalog();
+} catch (error) {
+  failed += 1;
+  console.error(`catalog: ${error instanceof Error ? error.message : String(error)}`);
+}
 if (failed > 0) {
-  console.error(`${failed} song(s) failed; their charts were not written.`);
+  console.error(`${failed} step(s) failed; nothing was written for them.`);
   process.exitCode = 1;
 }

@@ -14,3 +14,43 @@ export function starIcon(): SVGSVGElement {
   svg.append(path);
   return svg;
 }
+
+function strokeIcon(className: string, paths: readonly string[]): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.classList.add('line-icon', className);
+  for (const d of paths) {
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', d);
+    svg.append(path);
+  }
+  return svg;
+}
+
+/** Back: a chevron pointing left. */
+export function backIcon(): SVGSVGElement {
+  return strokeIcon('back-icon', ['M14.5 5.5 8 12l6.5 6.5']);
+}
+
+/** Settings: three sliders at different settings. */
+export function settingsIcon(): SVGSVGElement {
+  return strokeIcon('settings-icon', [
+    'M4 7h16M4 12h16M4 17h16',
+    'M9 5.2v3.6M15 10.2v3.6M7 15.2v3.6',
+  ]);
+}
+
+/** Credits: an eighth note. */
+export function noteIcon(): SVGSVGElement {
+  const svg = strokeIcon('note-icon', ['M14 17.5V4.5c1.4 2.6 4.6 3.1 4.6 6.4']);
+  const head = document.createElementNS(SVG_NS, 'ellipse');
+  head.setAttribute('cx', '11.2');
+  head.setAttribute('cy', '17.6');
+  head.setAttribute('rx', '3');
+  head.setAttribute('ry', '2.4');
+  head.setAttribute('transform', 'rotate(-20 11.2 17.6)');
+  head.classList.add('note-head');
+  svg.append(head);
+  return svg;
+}

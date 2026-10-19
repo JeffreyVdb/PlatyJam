@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createLifecycle } from '../app/lifecycle';
-import { type AudioEngine, createAudioEngine, SILENCE_FADE_MS } from './engine';
+import { type AudioEngine, createAudioEngine, MASTER_GAIN, SILENCE_FADE_MS } from './engine';
 
 type ResumeBehaviour = 'run' | 'reject' | 'hang' | 'stay-suspended' | 'frozen';
 
@@ -14,7 +14,7 @@ class FakeContext extends EventTarget {
   readonly destination = { label: 'destination' };
   /** What the next resume() calls do. */
   behaviour: ResumeBehaviour = 'run';
-  readonly gains: { connect: ReturnType<typeof vi.fn> }[] = [];
+  readonly gains: { gain: { value: number }; connect: ReturnType<typeof vi.fn> }[] = [];
 
   resume = vi.fn(() => {
     switch (this.behaviour) {
@@ -313,6 +313,33 @@ describe('createAudioEngine', () => {
       engine.silence(80);
       engine.silence();
       expect(fades).toEqual([80, SILENCE_FADE_MS]);
+    });
+  });
+
+  describe('master volume', () => {
+    it('scales the master gain, starting at full volume, and keeps it when the context is recreated', async () => {
+      const { engine } = await playing(1);
+      const master = () => ctx().gains[0]?.gain.value;
+      expect(engine.masterVolume).toBe(1);
+      expect(master()).toBeCloseTo(MASTER_GAIN);
+      engine.setMasterVolume(0.5);
+      expect(engine.masterVolume).toBe(0.5);
+      expect(master()).toBeCloseTo(MASTER_GAIN * 0.5);
+
+      engine.simulateInterruption({ stuck: true });
+      engine.resumeFromGesture();
+      expect(contexts).toHaveLength(2);
+      expect(master()).toBeCloseTo(MASTER_GAIN * 0.5);
+    });
+
+    it('clamps to 0–1 and ignores a value that is not a number', () => {
+      const { engine } = create();
+      engine.setMasterVolume(3);
+      expect(engine.masterVolume).toBe(1);
+      engine.setMasterVolume(-1);
+      expect(engine.masterVolume).toBe(0);
+      engine.setMasterVolume(Number.NaN);
+      expect(engine.masterVolume).toBe(0);
     });
   });
 

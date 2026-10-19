@@ -79,7 +79,9 @@ export type SessionState =
   | 'quit'
   /**
    * The chart, or a piano sample one of its notes needs, could not be loaded;
-   * `error` says why. Start stays unavailable: reloading the page is the way out.
+   * `error` says why. Start stays unavailable: `load()` again (another song, or the
+   * same chart once it can download). Piano samples load once, at launch: for those,
+   * reloading the page is the way out.
    */
   | 'error';
 
