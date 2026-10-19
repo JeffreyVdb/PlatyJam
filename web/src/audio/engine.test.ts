@@ -100,6 +100,7 @@ describe('createAudioEngine', () => {
       'unlocked',
       'interrupted',
       'needsgesture',
+      'recovered',
       'resumed',
       'recreated',
     ] as const) {
@@ -407,6 +408,75 @@ describe('createAudioEngine', () => {
       expect(engine.clock.isRunning).toBe(false);
       expect(events).not.toContain('resumed');
       expect(ctx().state).toBe('suspended');
+    });
+  });
+
+  describe('recovering audio without the song clock (the game countdown)', () => {
+    it('recovers the context and leaves the song paused where it was', async () => {
+      const { engine, events } = await playing(2);
+      engine.simulateInterruption();
+      await wait(100);
+      const held = engine.clock.position();
+
+      engine.resumeFromGesture({ resumeClock: false });
+      await wait(300);
+      expect(engine.phase).toBe('running');
+      expect(ctx().state).toBe('running');
+      expect(events.at(-1)).toBe('recovered');
+      expect(events).not.toContain('resumed');
+      expect(engine.clock.isRunning).toBe(false);
+      await wait(1000);
+      expect(engine.clock.position()).toBe(held);
+    });
+
+    it('resumes the clock and announces it on resumeClock()', async () => {
+      const { engine, events } = await playing(2);
+      engine.simulateInterruption({ stuck: true });
+      await wait(100);
+      engine.resumeFromGesture({ resumeClock: false });
+      await wait(300);
+      const held = engine.clock.position();
+
+      engine.resumeClock();
+      expect(events.at(-1)).toBe('resumed');
+      expect(engine.clock.isRunning).toBe(true);
+      await wait(500);
+      expect(engine.clock.position()).toBeGreaterThan(held + 400);
+    });
+
+    it('reports a recreated context on the resumed event that follows', async () => {
+      const { engine } = await playing(1);
+      const resumed: boolean[] = [];
+      engine.events.on('resumed', ({ recreated }) => resumed.push(recreated));
+      engine.simulateInterruption({ stuck: true });
+      engine.resumeFromGesture({ resumeClock: false });
+      await wait(300);
+      engine.resumeClock();
+      expect(resumed).toEqual([true]);
+    });
+
+    it('resumes a clock the game paused itself, with the audio still running', async () => {
+      const { engine, events } = await playing(1);
+      engine.clock.pause();
+      engine.resumeClock();
+      expect(engine.clock.isRunning).toBe(true);
+      expect(events.at(-1)).toBe('resumed');
+    });
+
+    it('refuses to resume the clock while the audio is interrupted', async () => {
+      const { engine, events } = await playing(1);
+      engine.simulateInterruption();
+      engine.resumeClock();
+      expect(engine.clock.isRunning).toBe(false);
+      expect(events).not.toContain('resumed');
+    });
+
+    it('emits recovered before resumed when resuming the clock too', async () => {
+      const { engine, events } = await playing(1);
+      engine.simulateInterruption();
+      engine.resumeFromGesture();
+      await wait(300);
+      expect(events.slice(-2)).toEqual(['recovered', 'resumed']);
     });
   });
 

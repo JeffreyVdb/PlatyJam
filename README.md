@@ -129,7 +129,8 @@ Subscribe with `engine.events.on(type, handler)`:
 | `unlocked`     | Audio started for the first time.                                                                       |
 | `interrupted`  | The song clock paused and audio is fading out. Show "Tap to resume"; call `engine.resumeFromGesture()`. |
 | `needsgesture` | That tap did not bring the sound back. Ask for one more tap; it recreates the context.                  |
-| `resumed`      | Audio runs again and the song clock continues. The accompaniment re-plans from the current song time.   |
+| `recovered`    | Audio runs again after an interruption. The song clock is still paused until `resumed`.                 |
+| `resumed`      | The song clock continues. The accompaniment re-plans from the current song time.                        |
 | `recreated`    | A new `AudioContext` replaced a stuck one. Nodes are gone; decoded `AudioBuffer`s are reused.           |
 | `silenced`     | `engine.silence()` was called (the calibration does on open): fade out every sound and forget the song. |
 
@@ -140,6 +141,7 @@ Subscribe with `engine.events.on(type, handler)`:
 - **Background:** on the lifecycle `pause` event, or when the context goes `interrupted` or suspends on its own, the engine pauses the song clock, emits `interrupted` (scheduled audio fades out over 30 ms), then suspends the context.
 - **Return:** on the lifecycle `resume` event it runs a silent recovery (suspend, wait 200 ms, resume) but leaves the song paused.
 - **Tap to resume:** `resumeFromGesture()` calls `resume()` inside the tap. If that rejects, takes over 300 ms, or the clock does not move afterwards (WebKit bug 263627), the overlay asks for one more tap, and that tap creates a new `AudioContext` synchronously before resuming. If the silent recovery already failed, the first tap recreates it.
+- **Recovered, then resumed:** once audio runs, `resumeFromGesture()` emits `recovered`, then resumes the song clock and emits `resumed`. Gameplay passes `{ resumeClock: false }` so its 3-2-1 countdown runs with the song still paused, then calls `engine.resumeClock()`.
 
 ### Credits
 
