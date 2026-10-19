@@ -35,18 +35,27 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, te
   return node;
 }
 
+/** A touch `pointerup` is followed by a synthesized `click` within this many ms. */
+const CLICK_AFTER_TOUCH_MS = 800;
+
 /**
  * A button for a command that may need to start audio. `pointerup` is the touch
- * gesture WebKit honours; `click` covers mouse and keyboard. The session ignores
- * the second call.
+ * gesture WebKit honours; `click` covers mouse and keyboard. The `click` a touch
+ * synthesizes afterwards is swallowed, so a command such as Restart runs once.
  */
 function gestureButton(label: string, variant: 'primary' | 'quiet', onTap: () => void) {
   const node = el('button', `hud-button hud-button--${variant}`, label);
   node.type = 'button';
+  let touchedAt = -Infinity;
   node.addEventListener('pointerup', (event) => {
-    if (event.pointerType !== 'mouse') onTap();
+    if (event.pointerType === 'mouse') return;
+    touchedAt = event.timeStamp;
+    onTap();
   });
-  node.addEventListener('click', onTap);
+  node.addEventListener('click', (event) => {
+    if (event.timeStamp - touchedAt < CLICK_AFTER_TOUCH_MS) return;
+    onTap();
+  });
   return node;
 }
 

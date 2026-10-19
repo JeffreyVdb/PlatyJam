@@ -857,6 +857,10 @@ body {
   text-shadow: 0 2px 12px rgb(3 14 22 / 70%);
 }
 
+.play-centre[hidden] {
+  display: none;
+}
+
 .play-combo {
   min-height: 1.4em;
   margin: 0;
