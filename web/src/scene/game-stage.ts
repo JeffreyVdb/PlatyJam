@@ -53,7 +53,9 @@ import { firstVisibleTile, longestHold, tileDepth } from './lane-layout';
  * analytic-antialiasing shader (`highway-material.ts`), not a texture. Everything that
  * repeats is an InstancedMesh with a fixed capacity drawn up to `count`; nothing is
  * allocated per frame. `rebuild()` disposes and recreates every GPU resource, which
- * a lost WebGL context requires.
+ * a lost WebGL context requires, and `resize()` does the same when the viewport's
+ * shape calls for the other layout (`highway-layout.ts`): geometry, camera, fog and
+ * touch area are all read from the active layout when they are used.
  */
 
 // Brand palette, kept in sync with src/style.css.

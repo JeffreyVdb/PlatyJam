@@ -238,6 +238,21 @@ The rules live in `simulation.ts`, `judgment.ts` and `scoring.ts`: pure code wit
 - A cancelled touch (a system gesture, palm rejection, a rotation that drops the touch) pauses the run without penalty, as does the window losing focus. A rotation that keeps the touches keeps the run: held tiles stay bound by pointer id and the lanes refit.
 - Pausing forgets every held input, so a finger still on the glass does nothing until it lifts and presses again (during the countdown, to reclaim a hold).
 
+### The stage
+
+`game-stage.ts` draws the lanes in one of two layouts, chosen in `resize()` from the measured shape of the stage (`selectLayout`: width over height from 1.15 up is landscape; orientation events are not used, so Split View and the iPadOS re-measure behave). Everything the layout decides lives in `highway-layout.ts`:
+
+| Layout     | When      | What it is                                                                                                                                                                                                                                                             |
+| ---------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `handheld` | portrait  | A long highway in perspective, played with both thumbs: lanes and notes as large as the width allows.                                                                                                                                                                  |
+| `tabletop` | landscape | The iPad lies on a table and is played like a piano: a camera nearly straight above, four lanes spanning the full width (inside `--edge` and the safe-area insets) and running off the bottom edge, so the lower half of the screen is key. The top band is the HUD's. |
+
+A layout owns the lane length (`far`, `near`), the tile and hit-line sizes, the camera and the touch area. Switching layouts rebuilds the stage's geometry (rotation is rare), and `rebuild()` after a lost WebGL context builds the current one. The scroll window always maps onto `far` (`tileDepth`), so a note takes the same real time to arrive in either layout; only the world distance it covers changes. The HUD reads the same decision as `data-layout` on `#hud`, plus `--hit-line-y`, and in the tabletop layout keeps to the band along the top (score and progress, combo and judgment, pause) so nothing covers the keys.
+
+Touch uses the layout's bounds: a touch is cast onto the table and divided over the four drawn lanes (`laneForPoint`), with a little slack beyond the outer lanes. The camera, the lane mapping and the layouts are plain functions with tests (`highway-layout.test.ts`, `lane-layout.test.ts`, `camera-fit.test.ts`).
+
+**Sharpness.** The lane surface is a shader (`highway-material.ts`), not a texture: every divider and the highway's sides are antialiased from the screen-space derivative (`fwidth`), so they are one device pixel crisp at any size, tilt or pixel ratio, and the far end fades into the water with the scene fog. The canvas renders at CSS size × device pixel ratio (capped at 2, `app/viewport.ts`), and MSAA stays off at 2× density (`antialias: window.devicePixelRatio < 2`). Draw calls stay at eleven.
+
 ### The menus
 
 `src/menus/` holds the screens around the game. They drive the session only through `GameSession` and live in the HUD layer, an HTML overlay above the canvas. Every screen works in portrait and landscape, keeps its controls at least 44 px, and stays inside the safe areas.
@@ -380,7 +395,7 @@ GitHub Pages serves `main` at https://jeffreyvdb.github.io/PlatyJam/.
 
 1. **Install.** Open the site in Safari, tap Share, then **Add to Home Screen** (keep **Open as Web App** on). Launch PlatyJam from the Home Screen icon.
 2. **Offline.** Launch once online and wait about 10 seconds ("Ready to play offline." appears on first install). Force-quit the app from the App Switcher, turn on Airplane Mode, and launch it again: the stage should appear.
-3. **Rotation.** Rotate the iPad; the lanes should refit without a reload in both orientations.
+3. **Rotation.** Rotate the iPad; the stage should change layout (a long highway in portrait, four full-width keys in landscape) without a reload.
 4. **Background.** Start a song, switch to another app and back: the song waits on the pause menu, exactly where it stopped.
 5. **Debug hook.** Open `https://jeffreyvdb.github.io/PlatyJam/?debug` (in Safari, or temporarily as the Home Screen URL). A panel shows the render state with **Lose context** and **Restore context** buttons. Lose then restore: the stage stops, then comes back with the scene rebuilt. Lose without restoring: after about 3 seconds the renderer is replaced (`renderer replaced 1×`). The same calls are available as `window.__platyjam.loseContext()` / `.restoreContext()` from Web Inspector (Safari on a Mac: Develop › your iPad › PlatyJam).
 6. **Updates.** After a new deployment, bring the app to the foreground; **Update now** appears in the top right.
@@ -392,7 +407,8 @@ Open the Home Screen app with `?debug`, pick Piano Sonata No. 8 "Pathétique" on
 1. **Performance (open).** The target is a steady 60 fps for the whole song. The debug panel's first line shows the frame rate; Low Power Mode caps Safari at 30 fps, so turn it off. Record the iPad model, the iPadOS and Safari versions, and the measured frame rate on PLA-6. This has not been measured yet.
 2. **Multi-touch.** Doubles with two fingers landing together both count; holds stay bound to their finger when it slides into another lane.
 3. **Pause and resume.** Hold a tile, then switch apps and come back: the pause menu shows; Resume brings the sound back, then counts 3-2-1 with the song still. Put the finger back on the held lane during the count to keep the hold.
-4. **Rotation.** Rotate mid-song: the lanes refit and play goes on, or it pauses if iPadOS cancelled the touches.
+4. **Rotation.** Rotate mid-song: the layout changes and play goes on, or it pauses if iPadOS cancelled the touches.
+5. **Sharpness and the landscape layout.** Compare portrait and landscape at the iPad's native density: dividers, tile edges and the hit line should be crisp, and tile and ring corners should show no visible stair-stepping (if they do, MSAA at 2× is the one-line change in `createWebGLRenderer`, to be weighed against the frame rate). In landscape the four lanes should span the width, the pause button and score sit above them, and every lane should be playable with the fingers resting on the keys, including both outer lanes and the area below the line. Record the iPad model and the iPadOS and Safari versions, in Safari and in Home Screen mode, and the landscape safe-area insets.
 
 ### Menus on an iPad
 
