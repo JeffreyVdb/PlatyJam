@@ -17,7 +17,7 @@ PlatyJam is a musical rhythm game planned for the browser. Follow the beat, hit 
 
 ## Status
 
-`web/` holds the app shell: an offline-capable PWA with a placeholder stage (tiles falling down four lanes), the audio engine (game clock, piano sampler, accompaniment scheduler and latency calibration), the chart format with a MIDI-to-chart converter, a starter pack of five songs (one of them generated), and a licence manifest that the credits data is generated from. Gameplay comes next.
+`web/` holds the app shell: an offline-capable PWA, the playable game (four lanes of tiles, holds and doubles, judgment, scoring, both fail modes, pause and countdown), the audio engine (game clock, piano sampler, accompaniment scheduler and latency calibration), the chart format with a MIDI-to-chart converter, a starter pack of five songs (one of them generated), and a licence manifest that the credits data is generated from. Menus, song select, settings and the real pause and results screens (PLA-7) come next; until then the game picks its song from the URL and shows small stand-in screens.
 
 ## Web app (`web/`)
 
@@ -53,7 +53,7 @@ The build is served from `/PlatyJam/` (the GitHub Pages project site). Set `BASE
 
 - `src/main.ts` wires the modules together; the platform logic sits in small modules under `src/app/` (lifecycle events, viewport sizing, touch guards, storage, service worker registration, the `?debug` hook).
 - `src/render/renderer-host.ts` owns the canvas, the WebGL renderer, the render loop and context-loss recovery.
-- `src/scene/` is the placeholder stage. `src/hud/` is the HTML layer above it, including the "Tap to resume" overlay and the `?debug` Audio tools.
+- `src/game/` is gameplay: the session contract, the simulation, judgment and scoring, lane input and the session controller (see [The game](#the-game)). `src/scene/` is the three.js stage. `src/hud/` is the HTML layer above it: the play HUD, the interim start, pause, countdown and results screens, the "Tap to resume" overlay and the `?debug` Audio tools.
 - `src/audio/` is the audio engine (see [Audio](#audio)); `src/calibration/` is the latency calibration overlay.
 - `src/chart/` is the chart format: the schema shared with the converter (`schema.ts`) and `loadChart()` (`load.ts`).
 - `scripts/midi-to-chart.ts` and `scripts/charts/` are the MIDI-to-chart converter; `songs-src/` holds the song sources and `public/songs/` the generated charts.
@@ -166,9 +166,9 @@ What ships:
   | Für Elise, WoO 59 (`beethoven-fur-elise`)                            | L. van Beethoven        | [Mutopia 931](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=931), Stelios Samelis | Public domain |
   | Sonata No. 8 "Pathétique", III. Rondo (`beethoven-pathetique-rondo`) | L. van Beethoven        | [Mutopia 296](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=296), Chris Sawer     | Public domain |
 
-## Gameplay
+## The game
 
-Everything under `web/src/game/`.
+Everything under `web/src/game/`, drawn by `web/src/scene/game-stage.ts`.
 
 ### The session contract (PLA-6 ↔ PLA-7)
 
@@ -211,6 +211,42 @@ Everything under `web/src/game/`.
 3. After 1, the song clock and the accompaniment resume together. A hold that was not reclaimed becomes a tail Miss (Classic: the run fails).
 
 The engine side of this: `engine.resumeFromGesture({ resumeClock: false })` recovers audio and emits `recovered` without moving the song clock; `engine.resumeClock()` then resumes the clock and emits `resumed`, which restarts the accompaniment.
+
+### Rules
+
+The rules live in `simulation.ts`, `judgment.ts` and `scoring.ts`: pure code with no clock, DOM or audio, and the tests that pin them. Every number below is a tunable constant there.
+
+- **Timing.** Chart times are ms at 1×; judgment windows are real ms, equally generous at every tempo. A press is judged at `timeline.judgeSongTime(event.timeStamp)` (calibration already applied). Perfect is within 50 ms, Good within 120 ms. An unhit tile becomes a Miss strictly after its +120 ms boundary.
+- **Which tile.** A press takes the earliest unresolved tile in its lane whose window contains it. A press with nothing to take is an empty tap: one Miss. During the lead-in (song time below 0) such a press is ignored instead, while a press inside the first tile's window still counts.
+- **Order.** The simulation is event-ordered: before judging an input it finalizes every Miss and hold completion timestamped before it, so the outcome never depends on the frame rate (the tests replay one passage at 30, 60 and 120 fps). Frames only finalize up to `judgeSongTime(now) − 50 ms × tempo`, so an input already on its way is judged before a Miss it could prevent.
+- **Holds.** The head and tail are separate units. A hit head plays the note and binds the hold to that finger or key and lane. Releasing within 120 ms of the tail, or still holding at the tail, gives a Perfect tail and releases the note. An earlier release is a tail Miss (Classic fails). An unhit head is a Miss (Classic fails; Relaxed also misses the tail). A completed hold never re-presses, however long the finger stays down.
+- **Scoring.** Perfect 100, Good 50, Miss 0, times `min(4, 1 + floor(comboBefore / 10))`. Successful units add to the combo; a Miss resets it. Accuracy is `100 × (Perfect + Good / 2) / resolved units`, so on a failed run the units never reached do not count.
+- **Progress and stars.** Progress is `songTime / durationMs` (lead-in excluded). One star at a third, two at two thirds, three for finishing. A failed run keeps the stars it had. The song finishes once time passes `durationMs` and every unit is resolved, never at the last tile. The Perfect badge needs a finished run with no Good and no Miss.
+- **Fail modes.** Classic ends the run at the first Miss or empty tap: the song falls silent, the missed tile turns red (or, for an empty tap, the pressed lane glows red at the line), the stage drifts back a little (a visual rewind only; nothing is replayed or re-judged), and the results follow. Relaxed lets misses break the combo and plays on.
+- **Sound.** A hit plays the tile's pitches at its velocity at once. A tap's note is released after 450 ms; a hold's note is released when the hold ends (the sample's natural decay is fine for long holds). The accompaniment is the chart's plus the chosen difficulty's, scheduled on the song clock, so tempo changes speed and never pitch. Melody tiles never play by themselves.
+
+### Input
+
+`input.ts` turns Pointer Events on `#stage` and the D F J K keys into lane presses, each keyed by its pointer id or key code:
+
+- A press counts anywhere on a lane, found by casting the pointer onto the highway, and binds the input to that lane until it lifts: sliding never changes lane. Two fingers landing in one frame are two presses with their own timestamps.
+- Key auto-repeat, a second press from an input that is already down, other mouse buttons and modified keys are ignored. An `event.timeStamp` more than 250 ms old, or in the future, is replaced by `performance.now()` (WebKit bug 217099).
+- A cancelled touch (a system gesture, palm rejection, a rotation that drops the touch) pauses the run without penalty, as does the window losing focus. A rotation that keeps the touches keeps the run: held tiles stay bound by pointer id and the lanes refit.
+- Pausing forgets every held input, so a finger still on the glass does nothing until it lifts and presses again (during the countdown, to reclaim a hold).
+
+### Playing it now (before PLA-7)
+
+`src/hud/interim-screens.ts` stands in for PLA-7's screens: the Start tile, the pause menu, the countdown and the results. It uses only the session contract. The song and settings come from the URL; anything missing or invalid falls back to its default:
+
+| Parameter    | Values                                                                                                                       | Default               |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------- | --------------------- |
+| `song`       | a chart id: `andre-sonatine`, `beethoven-fur-elise`, `beethoven-pathetique-rondo`, `billabong-morning`, `satie-gymnopedie-1` | `beethoven-fur-elise` |
+| `difficulty` | `easy`, `normal`, `hard`                                                                                                     | `normal`              |
+| `tempo`      | `0.75`, `1`, `1.25`, `1.5`                                                                                                   | `1`                   |
+| `fail`       | `classic`, `relaxed`                                                                                                         | `classic`             |
+| `scroll`     | real ms a tile is visible, 600–4000                                                                                          | `1600`                |
+
+For example `?song=beethoven-pathetique-rondo&difficulty=hard&tempo=1.5`. Play starts with the Start tile (or Enter or Space) once the chart and the piano have loaded. Escape pauses and resumes. Lanes are D F J K, a mouse click, or touch.
 
 ## Charts
 
@@ -322,9 +358,18 @@ GitHub Pages serves `main` at https://jeffreyvdb.github.io/PlatyJam/.
 1. **Install.** Open the site in Safari, tap Share, then **Add to Home Screen** (keep **Open as Web App** on). Launch PlatyJam from the Home Screen icon.
 2. **Offline.** Launch once online and wait about 10 seconds ("Ready to play offline." appears on first install). Force-quit the app from the App Switcher, turn on Airplane Mode, and launch it again: the stage should appear.
 3. **Rotation.** Rotate the iPad; the lanes should refit without a reload in both orientations.
-4. **Background.** Switch to another app and back; the tiles should continue from where they were, without a jump.
+4. **Background.** Start a song, switch to another app and back: the song waits on the pause menu, exactly where it stopped.
 5. **Debug hook.** Open `https://jeffreyvdb.github.io/PlatyJam/?debug` (in Safari, or temporarily as the Home Screen URL). A panel shows the render state with **Lose context** and **Restore context** buttons. Lose then restore: the stage stops, then comes back with the scene rebuilt. Lose without restoring: after about 3 seconds the renderer is replaced (`renderer replaced 1×`). The same calls are available as `window.__platyjam.loseContext()` / `.restoreContext()` from Web Inspector (Safari on a Mac: Develop › your iPad › PlatyJam).
 6. **Updates.** After a new deployment, bring the app to the foreground; **Update now** appears in the top right.
+
+### Gameplay on an iPad
+
+Open the Home Screen app with `?debug&song=beethoven-pathetique-rondo&difficulty=hard&tempo=1.5` (the stress case) and play it through.
+
+1. **Performance (open).** The target is a steady 60 fps for the whole song. The debug panel's first line shows the frame rate; Low Power Mode caps Safari at 30 fps, so turn it off. Record the iPad model, the iPadOS and Safari versions, and the measured frame rate on PLA-6. This has not been measured yet.
+2. **Multi-touch.** Doubles with two fingers landing together both count; holds stay bound to their finger when it slides into another lane.
+3. **Pause and resume.** Hold a tile, then switch apps and come back: the pause menu shows; Resume brings the sound back, then counts 3-2-1 with the song still. Put the finger back on the held lane during the count to keep the hold.
+4. **Rotation.** Rotate mid-song: the lanes refit and play goes on, or it pauses if iPadOS cancelled the touches.
 
 ### Audio on an iPad
 

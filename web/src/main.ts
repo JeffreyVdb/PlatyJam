@@ -7,11 +7,18 @@ import { installTouchGuards } from './app/touch-guards';
 import { watchViewport } from './app/viewport';
 import { createGameAudio, type GameAudio } from './audio/game-audio';
 import { openCalibration } from './calibration/calibration-overlay';
+import { loadChart } from './chart/load';
+import { installLaneInput } from './game/input';
+import { createGameplaySession, type GameplaySession } from './game/session';
+import { isRunActive } from './game/session-contract';
+import { setupFromQuery } from './game/url-setup';
 import { createAudioDebugSection } from './hud/audio-debug';
 import { createHud, type Hud } from './hud/hud';
+import { createInterimScreens } from './hud/interim-screens';
+import { createPlayHud } from './hud/play-hud';
 import { createResumeOverlay } from './hud/resume-overlay';
 import { createRendererHost, type RendererHost } from './render/renderer-host';
-import { createPlaceholderScene } from './scene/placeholder-scene';
+import { createGameStage } from './scene/game-stage';
 
 function required(selector: string): HTMLElement {
   const node = document.querySelector<HTMLElement>(selector);
@@ -22,8 +29,16 @@ function required(selector: string): HTMLElement {
 /**
  * Sound: unlock on the first gesture, the "Tap to resume" overlay, and the piano,
  * which starts loading now. Returns undefined where Web Audio is missing.
+ *
+ * `ownsPause` says whether a game run is handling interruptions itself (its pause
+ * screen and countdown); the generic overlay then stays out of the way.
  */
-function startAudio(hudRoot: HTMLElement, hud: Hud, reload: () => void): GameAudio | undefined {
+function startAudio(
+  hudRoot: HTMLElement,
+  hud: Hud,
+  reload: () => void,
+  ownsPause: () => boolean,
+): GameAudio | undefined {
   let audio: GameAudio;
   try {
     audio = createGameAudio({ bus: lifecycle, base: import.meta.env.BASE_URL });
@@ -39,12 +54,12 @@ function startAudio(hudRoot: HTMLElement, hud: Hud, reload: () => void): GameAud
     engine.resumeFromGesture();
   });
   engine.events.on('interrupted', () => {
-    overlay.show('paused');
+    if (!ownsPause()) overlay.show('paused');
   });
   engine.events.on('needsgesture', () => {
-    overlay.show('retry');
+    if (!ownsPause()) overlay.show('retry');
   });
-  engine.events.on('resumed', () => {
+  engine.events.on('recovered', () => {
     overlay.hide();
   });
 
@@ -59,6 +74,38 @@ function startAudio(hudRoot: HTMLElement, hud: Hud, reload: () => void): GameAud
   return audio;
 }
 
+/** What the stage draws when there is no game (no Web Audio). */
+const NO_GAME = { config: undefined, simulation: undefined, songMs: 0, state: 'loading' } as const;
+
+/**
+ * The game: a session for the song in the query string, lane input on the stage,
+ * and the interim screens standing in for PLA-7.
+ */
+function startGame(
+  stage: HTMLElement,
+  hudRoot: HTMLElement,
+  audio: GameAudio,
+  scene: ReturnType<typeof createGameStage>,
+): GameplaySession {
+  const session = createGameplaySession({ audio, bus: lifecycle });
+  const input = installLaneInput({
+    surface: stage,
+    laneAt: (x, y) => scene.laneAt(x, y),
+    accepting: () => session.acceptsInput(),
+    sink: session.input,
+  });
+  session.attachInput(input);
+  scene.setLaneHeld((lane) => input.isLaneHeld(lane));
+  createInterimScreens(hudRoot, session);
+
+  const { song, ...settings } = setupFromQuery(window.location.search);
+  session.load({
+    ...settings,
+    chart: loadChart(`${import.meta.env.BASE_URL}songs/${song}.json`),
+  });
+  return session;
+}
+
 function main() {
   const stage = required('#stage');
   const hudRoot = required('#hud');
@@ -69,7 +116,10 @@ function main() {
 
   installTouchGuards(stage);
   installPageLifecycle(lifecycle);
-  const audio = startAudio(hudRoot, hud, reload);
+  let session: GameplaySession | undefined;
+  const audio = startAudio(hudRoot, hud, reload, () =>
+    session ? isRunActive(session.state) : false,
+  );
   setupStoragePersistence();
   setupServiceWorker({
     bus: lifecycle,
@@ -98,14 +148,20 @@ function main() {
     return;
   }
 
-  const scene = createPlaceholderScene();
+  const scene = createGameStage({ surface: stage });
   lifecycle.on('resize', ({ width, height }) => {
     scene.resize(width, height);
+    // The HUD places the combo and judgment just above the hit line.
+    hudRoot.style.setProperty('--hit-line-y', `${(scene.hitLineY() * 100).toFixed(2)}%`);
   });
   // Every GPU resource died with the old context; rebuild before the loop restarts.
   lifecycle.on('contextrestored', () => {
     scene.rebuild();
   });
+
+  if (audio) {
+    session = startGame(stage, hudRoot, audio, scene);
+  }
 
   watchViewport({
     measure: () => {
@@ -117,13 +173,27 @@ function main() {
     },
   });
 
+  const playHud = session ? createPlayHud(hudRoot, session) : undefined;
+  if (session) {
+    session.events.on('judgment', (event) => {
+      scene.onJudgment(event);
+      playHud?.onJudgment(event);
+    });
+  }
   host.setFrame((delta, renderer) => {
-    scene.render(delta, renderer);
+    if (session) {
+      session.update();
+      scene.render(session.view(), delta, renderer);
+    } else {
+      scene.render(NO_GAME, delta, renderer);
+    }
+    playHud?.update();
   });
 
   if (isDebugEnabled(window.location.search)) {
     const hook = installDebugHook(window, host, lifecycle, () => scene.builds);
     const sections: HTMLElement[] = [];
+    hook.session = session;
     if (audio) {
       hook.audio = audio;
       const calibrate = () => {
