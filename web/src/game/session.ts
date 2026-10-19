@@ -129,7 +129,7 @@ export function createGameplaySession({
   const holdVoices = new Map<number, PianoVoice[]>();
   /** The furthest progress this run has reached; a failure never takes it back. */
   let furthest = 0;
-  /** When the run failed (performance ms) and where the clock stopped, for the rewind. */
+  /** When the run failed (performance ms) and the song time shown then, for the rewind. */
   let failedAt = 0;
   let failedSongMs = 0;
 
@@ -232,13 +232,15 @@ export function createGameplaySession({
       return;
     }
     if (sim.status === 'failed') {
+      // The rewind starts from what the stage shows, which trails the clock.
+      const shownSongMs = engine.timeline.songTime();
       clearTimer();
       engine.clock.pause();
       silence(FAIL_FADE_MS);
       input?.clear();
       countdown = undefined;
       failedAt = now();
-      failedSongMs = engine.clock.position();
+      failedSongMs = shownSongMs;
       const final = buildResults(sim, config);
       setState('failing');
       timer = setTimeout(() => {
@@ -318,12 +320,16 @@ export function createGameplaySession({
   const enterPause = (reason: PauseReason) => {
     if (!sim) return;
     clearTimer();
+    // In input time, as inputs are judged: read before the clock stops, or from the
+    // held position when the audio already stopped it.
+    const settledUpTo = engine.timeline.judgeSongTimeNow();
     engine.clock.pause();
     if (isPlaying()) {
-      // Every input made before the pause has been dispatched by now, so what is due
-      // by the pause is decided: holds still down at their tail complete, and Misses
-      // whose window closed count, before anything is suspended.
-      sim.advance(engine.clock.position());
+      // Settle what is already decided at the pause, before anything is suspended:
+      // holds still down at their tail complete, and Misses whose window closed count.
+      // No finalization grace: the pause comes through the same event queue as every
+      // input before it, so those are judged already, and later ones are dropped.
+      sim.advance(settledUpTo);
       afterSimulation();
       if (sim.status !== 'running') return;
     }
@@ -615,7 +621,7 @@ export function createGameplaySession({
       case 'finished': {
         const end = sim?.endMs ?? engine.clock.position();
         if (sim?.status !== 'failed') return end;
-        // From where the clock stopped back to a little before the failure.
+        // From what the stage showed back to a little before the failure.
         const target = end - REWIND_SONG_MS * config.tempo;
         const eased = easeOut((now() - failedAt) / REWIND_DURATION_MS);
         return failedSongMs + (target - failedSongMs) * eased;

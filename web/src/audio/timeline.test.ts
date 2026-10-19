@@ -108,4 +108,28 @@ describe('createTimeline', () => {
     // A tap that happened 0.5 s ago, received now.
     expect(timeline.judgeSongTime(250 + 2500)).toBeCloseTo(2500, 9);
   });
+
+  describe('judgeSongTimeNow', () => {
+    it('judges a tap received now while the clock runs', () => {
+      const { state, clock, timeline, advance } = world({ skewMs: 250 });
+      state.offsets.inputOffsetMs = 200;
+      clock.setTempo(1.5);
+      clock.start(0);
+      advance(2);
+      expect(timeline.judgeSongTimeNow()).toBeCloseTo(timeline.judgeSongTime(state.perfMs), 9);
+      expect(timeline.judgeSongTimeNow()).toBeCloseTo(3000 - 300, 9);
+    });
+
+    it('takes the input offset off the held position once the clock stopped', () => {
+      const { state, clock, timeline, advance } = world();
+      state.offsets.inputOffsetMs = -200;
+      clock.setTempo(0.75);
+      clock.start(0);
+      advance(2);
+      clock.pause();
+      advance(5);
+      // Held at 1500; at −200 ms a tap received as it stopped counts 200 ms (150 chart ms) later.
+      expect(timeline.judgeSongTimeNow()).toBeCloseTo(1500 + 150, 9);
+    });
+  });
 });

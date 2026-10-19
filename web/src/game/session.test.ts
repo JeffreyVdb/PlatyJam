@@ -45,14 +45,17 @@ function chartWith(tiles: Tile[], durationMs = 4000): Chart {
 function fakeAudio() {
   let ctxTime = 10;
   let perf = 50_000;
+  let inputOffsetMs = 0;
+  let outputLagMs = 0;
   const events = createEventBus<AudioEngineEvents>();
   const clock = createSongClock(() => ctxTime);
-  // Context time and performance time move together in this fake.
+  // Context time and performance time move together in this fake; what is heard
+  // trails the context by `outputLagMs`.
   const timeline = createTimeline({
     clock,
-    contextTimeAt: (perfMs) => ctxTime + (perfMs - perf) / 1000,
+    contextTimeAt: (perfMs) => ctxTime + (perfMs - perf - outputLagMs) / 1000,
     nowMs: () => perf,
-    offsets: () => ({ audioOffsetMs: 0, inputOffsetMs: 0 }),
+    offsets: () => ({ audioOffsetMs: 0, inputOffsetMs }),
   });
   const engine = {
     phase: 'running' as EnginePhase,
@@ -111,6 +114,14 @@ function fakeAudio() {
     },
     get perf() {
       return perf;
+    },
+    /** The calibrated input latency, in real ms. */
+    set inputOffsetMs(ms: number) {
+      inputOffsetMs = ms;
+    },
+    /** How far the audible (displayed) song time trails the clock's, in real ms. */
+    set outputLagMs(ms: number) {
+      outputLagMs = ms;
     },
   };
 }
@@ -344,6 +355,17 @@ describe('game session', () => {
       expect(songMs()).toBe(stoppedAt);
     });
 
+    it('starts the rewind from the song time on screen, not the clock ahead of it', async () => {
+      fake.outputLagMs = 40;
+      await loaded([tap(1000, 0), tap(3000, 1)]);
+      session.start();
+      while (session.state !== 'failing') frames(16);
+      // The stage showed what was heard: 40 ms behind the clock.
+      expect(session.view().songMs).toBeCloseTo(songMs() - 40);
+      fake.advance(REWIND_DURATION_MS);
+      expect(session.view().songMs).toBeCloseTo(1120 - REWIND_SONG_MS);
+    });
+
     it('never takes back progress or stars shown before a failure', async () => {
       // One third of 3000 is 1000; the tap at 870 expires at 990.
       await loaded([tap(870, 0), tap(3000, 1)], {
@@ -520,6 +542,89 @@ describe('game session', () => {
       expect(session.state).toBe('failing');
       expect(session.pauseInfo).toBeUndefined();
     });
+
+    describe.each([0.75, 1, 1.5] as const)(
+      'with a calibrated input offset at tempo %s',
+      (tempo) => {
+        /** Renders frames until the song clock reads `target`, landing on it exactly. */
+        const toSong = (target: number) => {
+          while (songMs() + 16 * tempo < target) frames(16);
+          fake.advance((target - songMs()) / tempo);
+          session.update();
+        };
+        /** Song ms of the clock when a tap received now is judged at `judgeMs`. */
+        const rawFor = (judgeMs: number, offsetMs: number) => judgeMs + offsetMs * tempo;
+        const resumeAll = async () => {
+          session.resume();
+          await vi.advanceTimersByTimeAsync(COUNTDOWN_BEAT_MS * 3);
+          expect(session.state).toBe('playing');
+        };
+
+        it.each([200, -200])(
+          'keeps a head still hittable in input time open across a pause (offset %s)',
+          async (offsetMs) => {
+            fake.inputOffsetMs = offsetMs;
+            await loaded([tap(1000, 0), tap(3000, 1)], { tempo });
+            session.start();
+            toSong(rawFor(1000, offsetMs));
+            session.pause();
+            expect(session.state).toBe('paused');
+            expect(session.stats()).toMatchObject({ miss: 0 });
+            await resumeAll();
+            press('a', 0);
+            expect(session.stats()).toMatchObject({ perfect: 1, miss: 0 });
+          },
+        );
+
+        it.each([200, -200])(
+          'keeps it open when the audio stopped the clock first (offset %s)',
+          async (offsetMs) => {
+            fake.inputOffsetMs = offsetMs;
+            await loaded([tap(1000, 0), tap(3000, 1)], { tempo });
+            session.start();
+            toSong(rawFor(1000, offsetMs));
+            fake.engine.phase = 'interrupted';
+            fake.engine.clock.pause();
+            fake.engine.events.emit('interrupted', { reason: 'background' });
+            expect(session.state).toBe('paused');
+            expect(session.stats()).toMatchObject({ miss: 0 });
+          },
+        );
+
+        it.each([200, -200])(
+          'settles a Miss already due in input time when pausing (offset %s)',
+          async (offsetMs) => {
+            fake.inputOffsetMs = offsetMs;
+            await loaded([tap(1000, 0), tap(3000, 1)], { tempo });
+            session.start();
+            // Just past the tap's late boundary (1000 + 120 real ms) in input time.
+            toSong(rawFor(1000 + 130 * tempo, offsetMs));
+            expect(session.state).toBe('playing');
+            session.pause();
+            expect(session.state).toBe('failing');
+            expect(session.stats()).toMatchObject({ miss: 1 });
+          },
+        );
+
+        it.each([200, -200])(
+          'completes a hold held past its tail in input time when pausing (offset %s)',
+          async (offsetMs) => {
+            fake.inputOffsetMs = offsetMs;
+            await loaded([hold(1000, 0, 1000)], { tempo });
+            session.start();
+            toSong(rawFor(1000, offsetMs));
+            press('a', 0);
+            toSong(rawFor(2000 + 20 * tempo, offsetMs));
+            expect(session.stats()).toMatchObject({ perfect: 1 });
+            session.pause();
+            expect(session.stats()).toMatchObject({ perfect: 2, miss: 0 });
+            expect(session.pauseInfo?.heldLanes).toEqual([]);
+            await resumeAll();
+            expect(session.stats()).toMatchObject({ perfect: 2, miss: 0 });
+          },
+        );
+      },
+    );
 
     it('fails Classic on resume when a held lane was not reclaimed', async () => {
       await loaded([hold(1000, 0, 2000)]);

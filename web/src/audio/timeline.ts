@@ -32,6 +32,13 @@ export interface Timeline {
    * judge hits with: the input offset is applied here and nowhere else.
    */
   judgeSongTime(eventTimeStamp: number): number;
+  /**
+   * Song ms at which a tap received right now would be judged: `judgeSongTime(now)`
+   * while the clock runs. Once it stopped, the held position less the input offset,
+   * as for a tap received the moment it stopped (`judgeSongTime` can only return the
+   * held position then).
+   */
+  judgeSongTimeNow(): number;
   /** Context seconds to start a sound so it is heard at song ms `songMs`. Needs a running clock. */
   startTimeFor(songMs: number): number;
 }
@@ -54,6 +61,9 @@ export function createTimeline({
   let highWater = -Infinity;
   let generation = -1;
 
+  const judgeSongTime = (eventTimeStamp: number) =>
+    clock.songTimeAt(contextTimeAt(eventTimeStamp - offsets().inputOffsetMs));
+
   return {
     clock,
     songTime() {
@@ -65,8 +75,10 @@ export function createTimeline({
       highWater = Math.max(highWater, clock.songTimeAt(contextTimeAt(nowMs())));
       return highWater;
     },
-    judgeSongTime(eventTimeStamp) {
-      return clock.songTimeAt(contextTimeAt(eventTimeStamp - offsets().inputOffsetMs));
+    judgeSongTime,
+    judgeSongTimeNow() {
+      if (clock.isRunning) return judgeSongTime(nowMs());
+      return clock.position() - offsets().inputOffsetMs * clock.tempo;
     },
     startTimeFor(songMs) {
       return clock.ctxTimeFor(songMs) - offsets().audioOffsetMs / 1000;
