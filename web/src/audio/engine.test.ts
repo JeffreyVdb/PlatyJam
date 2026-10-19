@@ -11,6 +11,8 @@ class FakeContext extends EventTarget {
   frozen = false;
   readonly sampleRate = 48_000;
   readonly baseLatency = 0.005;
+  /** Seconds, as the browser reports it. */
+  outputLatency: number | undefined = undefined;
   readonly destination = { label: 'destination' };
   /** What the next resume() calls do. */
   behaviour: ResumeBehaviour = 'run';
@@ -133,6 +135,68 @@ describe('createAudioEngine', () => {
     await wait(seconds * 1000);
     return made;
   };
+
+  describe('output latency', () => {
+    const running = async () => {
+      const made = create();
+      await unlock(made.engine);
+      return made.engine;
+    };
+
+    it("is reported in milliseconds, converted from the context's seconds", async () => {
+      const engine = await running();
+      ctx().outputLatency = 0.187;
+      expect(engine.outputLatency()).toBeCloseTo(187, 6);
+    });
+
+    it.each([
+      ['missing', undefined],
+      ['zero (WebKit before the context renders)', 0],
+      ['negative', -0.01],
+      ['not a number', Number.NaN],
+      ['infinite', Number.POSITIVE_INFINITY],
+    ])('is unknown when the reading is %s', async (_, seconds) => {
+      const engine = await running();
+      ctx().outputLatency = seconds;
+      expect(engine.outputLatency()).toBeUndefined();
+    });
+
+    it('is unknown until the context runs, and while it is suspended', async () => {
+      const { engine } = create();
+      ctx().outputLatency = 0.2;
+      expect(engine.outputLatency()).toBeUndefined();
+      await unlock(engine);
+      expect(engine.outputLatency()).toBeCloseTo(200, 6);
+      ctx().setState('suspended');
+      expect(engine.outputLatency()).toBeUndefined();
+    });
+
+    it('follows a recreated context', async () => {
+      const engine = await running();
+      ctx().outputLatency = 0.3;
+      engine.simulateInterruption({ stuck: true });
+      engine.resumeFromGesture();
+      await wait(500);
+      expect(contexts).toHaveLength(2);
+      ctx().outputLatency = 0.01;
+      expect(engine.outputLatency()).toBeCloseTo(10, 6);
+    });
+
+    it('can be faked for ?debug, in milliseconds, and put back', async () => {
+      const engine = await running();
+      ctx().outputLatency = 0.01;
+      engine.setDebugOutputLatency(250);
+      expect(engine.outputLatency()).toBe(250);
+      engine.setDebugOutputLatency(undefined);
+      expect(engine.outputLatency()).toBeCloseTo(10, 6);
+    });
+
+    it('keeps a faked value unknown while the context is not running', () => {
+      const { engine } = create();
+      engine.setDebugOutputLatency(250);
+      expect(engine.outputLatency()).toBeUndefined();
+    });
+  });
 
   describe('audio session', () => {
     it('asks for the playback session before creating the context', () => {

@@ -68,7 +68,7 @@ describe('appendSample', () => {
       window = appendSample(window, 10);
       seen.push(judgeOutput(window));
     }
-    expect(seen).toEqual([...repeat('unsure', VERDICT_SAMPLES - 1), 'onTime']);
+    expect(seen).toEqual([...Array<string>(VERDICT_SAMPLES - 1).fill('unsure'), 'onTime']);
   });
 });
 
