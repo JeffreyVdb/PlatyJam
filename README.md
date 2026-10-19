@@ -206,7 +206,7 @@ Everything under `web/src/game/`.
 
 **Pause, audio recovery and the countdown.** Pausing (the HUD button, backgrounding, an audio interruption, a cancelled touch, the window losing focus) freezes the song clock and judgment, fades out all sound, keeps the progress of held tiles and forgets which finger or key held them; `pauseInfo.heldLanes` lists those lanes. The pause screen calls `resume()` from a tap:
 
-1. If the audio was interrupted, the session recovers it with the song clock still paused: `pauseInfo.audio` goes `recovering`, then the countdown starts by itself. If it says `needsGesture`, ask for one more tap and call `resume()` again from it (that tap recreates the audio context).
+1. If the audio was interrupted (`pauseInfo.audio` is `interrupted`), the session recovers it with the song clock still paused: `pauseInfo.audio` goes `recovering`, then the countdown starts by itself. If it says `needsGesture`, ask for one more tap and call `resume()` again from it (that tap recreates the audio context).
 2. `countdown.beat` counts 3, 2, 1, a second each. The countdown screen must let pointer events through: pressing a lane in `countdown.heldLanes` binds that hold to the new finger or key.
 3. After 1, the song clock and the accompaniment resume together. A hold that was not reclaimed becomes a tail Miss (Classic: the run fails).
 

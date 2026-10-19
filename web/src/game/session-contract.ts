@@ -105,13 +105,15 @@ export type PauseReason =
   | 'blur';
 
 /**
- * - `ok`: audio is running; `resume()` starts the countdown at once.
+ * - `running`: audio runs; `resume()` starts the countdown at once.
+ * - `interrupted`: the audio stopped (backgrounding, a call). `resume()` must come
+ *   from a tap: it brings the audio back first.
  * - `recovering`: `resume()` was called and the audio is coming back. The countdown
  *   starts by itself when it has; the song clock stays paused meanwhile.
  * - `needsGesture`: the audio did not come back. Ask for one more tap and call
  *   `resume()` from it again (that tap recreates the audio context).
  */
-export type AudioRecovery = 'ok' | 'recovering' | 'needsGesture';
+export type AudioRecovery = 'running' | 'interrupted' | 'recovering' | 'needsGesture';
 
 export interface PauseInfo {
   reason: PauseReason;
