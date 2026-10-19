@@ -5,7 +5,13 @@ import { createAudioDebugSection } from './audio-debug';
 function fakeAudio() {
   const noop = () => undefined;
   const piano = { stopAll: vi.fn(), noteOn: vi.fn(), noteOff: vi.fn(), setPlaybackRate: noop };
-  const accompaniment = { stopAll: vi.fn(), play: vi.fn(), pause: vi.fn(), resume: vi.fn() };
+  const accompaniment = {
+    stopAll: vi.fn(),
+    play: vi.fn(),
+    pause: vi.fn(),
+    resume: vi.fn(),
+    stats: () => ({ scheduled: 0, skipped: 0, lastLeadMs: 0 }),
+  };
   const backing = { stopAll: vi.fn(), play: vi.fn(), pause: vi.fn(), resume: vi.fn() };
   const engine = {
     context: { currentTime: 0 },
@@ -15,6 +21,8 @@ function fakeAudio() {
     clock: { position: () => 0, pause: noop },
     debugState: () => ({ unlockAttempts: {}, phase: 'running', contextState: 'running' }),
     simulateInterruption: noop,
+    outputLatency: () => 187.4,
+    setDebugOutputLatency: vi.fn(),
   };
   const audio = {
     engine,
@@ -25,7 +33,7 @@ function fakeAudio() {
     setTuning: noop,
     activeVoices: () => 0,
   } as unknown as GameAudio;
-  return { audio, piano, accompaniment, backing };
+  return { audio, piano, accompaniment, backing, engine };
 }
 
 describe('the debug Audio section', () => {
@@ -47,5 +55,70 @@ describe('the debug Audio section', () => {
     expect(fake.accompaniment.stopAll).toHaveBeenCalledWith(200);
     expect(fake.piano.stopAll).toHaveBeenCalledWith(200);
     expect(fake.backing.stopAll).toHaveBeenCalledWith(200);
+  });
+
+  it('shows the output latency in milliseconds, and "unknown" when there is none', () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const fake = fakeAudio();
+    const section = createAudioDebugSection({
+      audio: fake.audio,
+      openCalibration: () => undefined,
+    });
+    expect(section.textContent).toContain('Output latency now: 187.4 ms');
+    fake.engine.outputLatency = () => undefined as unknown as number;
+    vi.advanceTimersByTime(250);
+    expect(section.textContent).toContain('Output latency now: unknown');
+  });
+
+  it('fakes the output latency from its buttons, and goes back to the real one', () => {
+    vi.useFakeTimers();
+    const fake = fakeAudio();
+    const section = createAudioDebugSection({
+      audio: fake.audio,
+      openCalibration: () => undefined,
+    });
+    const press = (label: string) =>
+      [...section.querySelectorAll('button')].find((node) => node.textContent === label)?.click();
+    press('250 ms');
+    expect(fake.engine.setDebugOutputLatency).toHaveBeenLastCalledWith(250);
+    expect(section.textContent).toContain('(faked)');
+    press('Real');
+    expect(fake.engine.setDebugOutputLatency).toHaveBeenLastCalledWith(undefined);
+    expect(section.textContent).not.toContain('(faked)');
+  });
+
+  it('starts on the latency faked by ?debug&latency=, even a value the buttons lack', () => {
+    vi.useFakeTimers();
+    const section = createAudioDebugSection({
+      audio: fakeAudio().audio,
+      openCalibration: () => undefined,
+      fakedLatencyMs: 333,
+    });
+    const pressed = section.querySelector('button[aria-pressed="true"]');
+    expect(pressed?.textContent).toBe('333 ms');
+  });
+
+  it('logs each device change with its time, newest first', () => {
+    vi.useFakeTimers();
+    const devices = new EventTarget();
+    const section = createAudioDebugSection({
+      audio: fakeAudio().audio,
+      openCalibration: () => undefined,
+      devices,
+    });
+    expect(section.textContent).toContain('Device changes: none yet');
+    devices.dispatchEvent(new Event('devicechange'));
+    devices.dispatchEvent(new Event('devicechange'));
+    const lines = section.textContent.match(/\d\d:\d\d:\d\d\.\d{3} latency 187 ms/g);
+    expect(lines).toHaveLength(2);
+  });
+
+  it('says when the browser reports no device changes', () => {
+    vi.useFakeTimers();
+    const section = createAudioDebugSection({
+      audio: fakeAudio().audio,
+      openCalibration: () => undefined,
+    });
+    expect(section.textContent).toContain('Device changes: not reported by this browser');
   });
 });
