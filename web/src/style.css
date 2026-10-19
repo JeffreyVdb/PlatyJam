@@ -1954,6 +1954,8 @@ body {
 .credit-facts {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
+  /* Labels stay level with the text of the taller link rows. */
+  align-items: baseline;
   gap: 6px 16px;
   margin: 0;
   font-size: 0.9375rem;
@@ -1969,7 +1971,13 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* A whole touch target (44 px) per link, without overlapping its neighbour. */
 .credit-link {
+  display: inline-flex;
+  align-items: center;
+  min-width: 44px;
+  min-height: 44px;
+  max-width: 100%;
   color: var(--ripple);
   text-decoration-thickness: 1.5px;
   text-underline-offset: 3px;
