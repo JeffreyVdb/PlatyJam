@@ -14,6 +14,13 @@ import type {
   SessionSetup,
   SessionState,
 } from '../game/session-contract';
+import { createOutputLatencyWatch } from '../audio/latency-watch';
+import {
+  BAND_TOLERANCE_MS,
+  DELAYED_OUTPUT_MS,
+  SAMPLE_INTERVAL_MS,
+  VERDICT_SAMPLES,
+} from '../audio/latency-warning';
 import { createSaveStore, type SaveStore } from '../save/save-store';
 import { createMenus, type Menus } from './menus';
 
@@ -205,10 +212,19 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/** A delayed output, and one that is on time. */
+const DELAYED = DELAYED_OUTPUT_MS + 150;
+const ON_TIME = 10;
+
 function setup({
   storage = memoryStorage(),
   online = true,
-}: { storage?: ReturnType<typeof memoryStorage>; online?: boolean } = {}) {
+  audioRunning = true,
+}: {
+  storage?: ReturnType<typeof memoryStorage>;
+  online?: boolean;
+  audioRunning?: boolean;
+} = {}) {
   const session = new FakeSession();
   const store: SaveStore = createSaveStore({ storage: () => storage });
   const fetched: string[] = [];
@@ -224,6 +240,17 @@ function setup({
   const openCalibration = vi.fn((onClose: () => void) => {
     closeCalibration = onClose;
   });
+  // The output latency the fake device reports; the real watch judges it.
+  const output: { ms: number | undefined; running: boolean } = {
+    ms: undefined,
+    running: audioRunning,
+  };
+  const latency = createOutputLatencyWatch({ read: () => output.ms });
+  /** Readings taken while the player browsed the song list. */
+  const primeLatency = (ms: number | undefined) => {
+    output.ms = ms;
+    for (let i = 0; i < VERDICT_SAMPLES; i += 1) latency.sampleNow();
+  };
   menus = createMenus({
     root,
     stage,
@@ -235,10 +262,16 @@ function setup({
     setVolume,
     offsets: () => ({ audioOffsetMs: 40, inputOffsetMs: -10 }),
     openCalibration,
+    latency,
+    audioRunning: () => output.running,
+    platform: 'other',
     reload,
     online: () => online,
   });
   return {
+    latency,
+    output,
+    primeLatency,
     session,
     store,
     fetched,
@@ -278,6 +311,10 @@ const touchTap = (node: HTMLElement, { click = node }: { click?: HTMLElement } =
   pointer('pointerup');
   // The click goes to whatever is under the finger once pointerup has run.
   click.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+};
+/** A touch's click is dropped for a moment; the next pointer press ends that (see `onGesture`). */
+const nextPress = () => {
+  document.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch' }));
 };
 const toSongs = (session: FakeSession) => {
   tap(q('.home-tile'));
@@ -636,5 +673,267 @@ describe('menus', () => {
     session.set('starting');
     session.set('ready');
     expect(q('.play-note').textContent).toBe("The sound didn't start. Tap Play again.");
+  });
+
+  describe('a delayed output', () => {
+    const dialog = () => root.querySelector<HTMLElement>('.game-sheet--latency');
+    /** A button in the dialog: the screens underneath have a Back of their own. */
+    const inDialog = (name: string) => {
+      const found = [...(dialog()?.querySelectorAll('button') ?? [])].find(
+        (node) => node.textContent.trim() === name,
+      );
+      if (!found) throw new Error(`no dialog button ${name}`);
+      return found;
+    };
+    const started = (session: FakeSession) => session.calls.filter((call) => call === 'start');
+    /** On the song list with a delayed output already measured. */
+    const delayed = (options: Parameters<typeof setup>[0] = {}) => {
+      const made = setup(options);
+      toSongs(made.session);
+      made.primeLatency(DELAYED);
+      return made;
+    };
+
+    it('asks before starting, and starts nothing yet', () => {
+      const { session } = delayed();
+      tap(q('.play-tile'));
+      expect(started(session)).toEqual([]);
+      expect(dialog()?.getAttribute('role')).toBe('dialog');
+      expect(q('.game-card-title').textContent).toBe('Your sound is delayed');
+      expect(dialog()?.textContent).toContain(`add about ${DELAYED}\u00a0ms`);
+      expect(q('.screen--songs').inert).toBe(true);
+      expect(document.activeElement?.textContent).toBe('Use speakers');
+    });
+
+    it('starts at once when the output is on time, unknown, or not measured yet', () => {
+      for (const prime of [ON_TIME, undefined, 'none'] as const) {
+        const { session, primeLatency } = setup();
+        toSongs(session);
+        if (prime !== 'none') primeLatency(prime);
+        tap(q('.play-tile'));
+        expect(started(session)).toEqual(['start']);
+        expect(dialog()).toBeNull();
+        menus?.dispose();
+        document.body.replaceChildren(stage, root);
+        root.replaceChildren();
+      }
+    });
+
+    it('takes one more reading on the tap: a first reading alone never warns', () => {
+      const { session, output } = setup();
+      toSongs(session);
+      output.ms = DELAYED;
+      tap(q('.play-tile'));
+      expect(started(session)).toEqual(['start']);
+    });
+
+    it('starts the song from "Play anyway", inside that tap, and asks again next time', () => {
+      const { session, store } = delayed();
+      tap(q('.play-tile'));
+      touchTap(inDialog('Play anyway'));
+      expect(started(session)).toEqual(['start']);
+      expect(dialog()).toBeNull();
+      expect(menus?.view).toBe('play');
+      expect(store.settings.latencyWarningMutedAtMs).toBeNull();
+
+      session.quit();
+      nextPress();
+      tap(q('.play-tile'));
+      expect(dialog()).not.toBeNull();
+    });
+
+    it('remembers "Play, don\'t ask again" across a relaunch, for about the same delay', () => {
+      const storage = memoryStorage();
+      const first = delayed({ storage });
+      tap(q('.play-tile'));
+      touchTap(inDialog("Play, don't ask again"));
+      expect(started(first.session)).toEqual(['start']);
+      expect(first.store.settings.latencyWarningMutedAtMs).toBe(DELAYED);
+      menus?.dispose();
+      document.body.replaceChildren(stage, root);
+      root.replaceChildren();
+
+      nextPress();
+      const second = setup({ storage });
+      toSongs(second.session);
+      second.primeLatency(DELAYED + BAND_TOLERANCE_MS);
+      tap(q('.play-tile'));
+      expect(started(second.session)).toEqual(['start']);
+      expect(dialog()).toBeNull();
+    });
+
+    it('asks again when the delay is another band than the one silenced', () => {
+      const storage = memoryStorage();
+      setup({ storage }).store.updateSettings({ latencyWarningMutedAtMs: DELAYED });
+      menus?.dispose();
+      root.replaceChildren();
+      const { session, primeLatency } = setup({ storage });
+      toSongs(session);
+      primeLatency(DELAYED + BAND_TOLERANCE_MS + 1);
+      tap(q('.play-tile'));
+      expect(started(session)).toEqual([]);
+      expect(dialog()).not.toBeNull();
+    });
+
+    it('closes the dialog on Escape and stays on the song list, on the Play tile', () => {
+      const { session } = delayed();
+      tap(q('.play-tile'));
+      key('Escape');
+      expect(dialog()).toBeNull();
+      expect(menus?.view).toBe('songs');
+      expect(started(session)).toEqual([]);
+      expect(q('.screen--songs').inert).toBe(false);
+      expect(document.activeElement).toBe(q('.play-tile'));
+    });
+
+    it('does not start the song on Enter behind the dialog', () => {
+      const { session } = delayed();
+      tap(q('.play-tile'));
+      key('Enter');
+      expect(started(session)).toEqual([]);
+      expect(dialog()).not.toBeNull();
+    });
+
+    describe('Use speakers', () => {
+      it('shows how to switch, and the delay it still sees', () => {
+        const { primeLatency } = delayed();
+        tap(q('.play-tile'));
+        tap(inDialog('Use speakers'));
+        expect(q('.game-card-title').textContent).toBe('Switch to the speaker');
+        expect(dialog()?.querySelectorAll('.latency-step').length).toBeGreaterThan(0);
+        expect(q('.latency-status').textContent).toBe(`Still about ${DELAYED}\u00a0ms late.`);
+        primeLatency(DELAYED + 100);
+        expect(q('.latency-status').textContent).toBe(`Still about ${DELAYED + 100}\u00a0ms late.`);
+      });
+
+      it('goes back to the choices, from its button or Escape', () => {
+        delayed();
+        tap(q('.play-tile'));
+        tap(inDialog('Use speakers'));
+        tap(inDialog('Back'));
+        expect(q('.game-card-title').textContent).toBe('Your sound is delayed');
+        tap(inDialog('Use speakers'));
+        key('Escape');
+        expect(q('.game-card-title').textContent).toBe('Your sound is delayed');
+        expect(dialog()).not.toBeNull();
+      });
+
+      it('carries on by itself once the output is on time, debounced', () => {
+        const { session, output, latency } = delayed();
+        tap(q('.play-tile'));
+        tap(inDialog('Use speakers'));
+        output.ms = ON_TIME;
+        for (let i = 0; i < VERDICT_SAMPLES - 1; i += 1) latency.sampleNow();
+        expect(started(session)).toEqual([]);
+        expect(dialog()).not.toBeNull();
+        latency.sampleNow();
+        expect(started(session)).toEqual(['start']);
+        expect(dialog()).toBeNull();
+        expect(menus?.view).toBe('play');
+      });
+
+      it('waits while the readings are unknown right after the switch', () => {
+        const { session, output, latency } = delayed();
+        tap(q('.play-tile'));
+        tap(inDialog('Use speakers'));
+        output.ms = undefined;
+        for (let i = 0; i < VERDICT_SAMPLES * 2; i += 1) latency.sampleNow();
+        expect(started(session)).toEqual([]);
+        expect(q('.latency-status').textContent).toBe('Checking the sound…');
+        output.ms = ON_TIME;
+        for (let i = 0; i < VERDICT_SAMPLES; i += 1) latency.sampleNow();
+        expect(started(session)).toEqual(['start']);
+      });
+
+      it('does not start a song while the sound is not running, and leaves the Play tile', () => {
+        const { session, output, latency } = delayed();
+        tap(q('.play-tile'));
+        tap(inDialog('Use speakers'));
+        output.running = false;
+        output.ms = ON_TIME;
+        for (let i = 0; i < VERDICT_SAMPLES; i += 1) latency.sampleNow();
+        expect(started(session)).toEqual([]);
+        expect(dialog()).toBeNull();
+        expect(menus?.view).toBe('songs');
+        expect(document.activeElement).toBe(q('.play-tile'));
+      });
+
+      it('polls on a timer when the watch runs', () => {
+        vi.useFakeTimers();
+        const { session, output, latency } = delayed();
+        tap(q('.play-tile'));
+        tap(inDialog('Use speakers'));
+        latency.start();
+        output.ms = ON_TIME;
+        vi.advanceTimersByTime(SAMPLE_INTERVAL_MS * VERDICT_SAMPLES);
+        expect(started(session)).toEqual(['start']);
+        latency.dispose();
+      });
+    });
+
+    it('offers the calibration, and returns to the dialog when it closes', () => {
+      const { session, openCalibration, closeCalibration } = delayed();
+      tap(q('.play-tile'));
+      tap(inDialog('Calibrate timing'));
+      expect(openCalibration).toHaveBeenCalledTimes(1);
+      expect(dialog()?.inert).toBe(true);
+      // Escape belongs to the calibration while it is open.
+      key('Escape');
+      expect(dialog()).not.toBeNull();
+      closeCalibration();
+      expect(dialog()?.inert).toBe(false);
+      expect(document.activeElement?.textContent).toBe('Calibrate timing');
+      expect(started(session)).toEqual([]);
+    });
+
+    it('is gone when the song list is, and when the menus are disposed', () => {
+      const { session } = delayed();
+      tap(q('.play-tile'));
+      session.set('starting');
+      session.set('leadIn');
+      expect(dialog()).toBeNull();
+      expect(q('.play-hud')).not.toBeNull();
+    });
+  });
+
+  describe('the output latency in Settings', () => {
+    const settings = () => q('.screen--settings').textContent;
+
+    it('shows the latency in ms, or unknown', () => {
+      vi.useFakeTimers();
+      const { session, primeLatency } = setup();
+      toSongs(session);
+      tap(buttonNamed('Settings'));
+      expect(settings()).toContain('Audio output latency: unknown');
+      primeLatency(187.4);
+      vi.advanceTimersByTime(300);
+      expect(settings()).toContain('Audio output latency: 187 ms');
+    });
+
+    it('shows a silenced warning, and turns it back on', () => {
+      const storage = memoryStorage();
+      const { session, store, primeLatency } = setup({ storage });
+      store.updateSettings({ latencyWarningMutedAtMs: 190 });
+      toSongs(session);
+      tap(buttonNamed('Settings'));
+      expect(settings()).toContain("won't warn you before a song");
+      expect(settings()).toContain('about 190 ms');
+
+      tap(buttonNamed('Warn me again'));
+      expect(store.settings.latencyWarningMutedAtMs).toBeNull();
+      expect(q('.settings-muted').hidden).toBe(true);
+
+      primeLatency(DELAYED);
+      tap(q('.screen--settings .icon-button'));
+      tap(q('.play-tile'));
+      expect(root.querySelector('.game-sheet--latency')).not.toBeNull();
+    });
+
+    it('hides the line about a silenced warning when nothing is silenced', () => {
+      const { session } = setup();
+      toSongs(session);
+      tap(buttonNamed('Settings'));
+      expect(q('.settings-muted').hidden).toBe(true);
+    });
   });
 });

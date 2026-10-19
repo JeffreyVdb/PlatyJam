@@ -29,6 +29,8 @@ export interface SongSelect extends Screen {
   /** Re-reads the selection and the best scores. */
   refresh(): void;
   setPlay(play: PlayButton): void;
+  /** The Play tile: where focus goes back to when the delayed-sound dialog is cancelled. */
+  readonly playButton: HTMLElement;
   readonly settingsButton: HTMLElement;
   readonly creditsButton: HTMLElement;
 }
@@ -169,6 +171,7 @@ export function createSongSelect(options: SongSelectOptions): SongSelect {
       if (playLabel.textContent !== label) playLabel.textContent = label;
       if (note.textContent !== text) note.textContent = text;
     },
+    playButton: play,
     settingsButton,
     creditsButton,
   };

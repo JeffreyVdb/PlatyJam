@@ -9,6 +9,19 @@ export function isDebugEnabled(search: string): boolean {
   return new URLSearchParams(search).has('debug');
 }
 
+/**
+ * `?debug&latency=250`: fakes the audio output latency (ms) so the delayed-sound
+ * warning shows without Bluetooth headphones. Only with `?debug`; anything that is
+ * not a positive number is ignored.
+ */
+export function debugOutputLatency(search: string): number | undefined {
+  if (!isDebugEnabled(search)) return undefined;
+  const value = new URLSearchParams(search).get('latency');
+  if (value === null || value.trim() === '') return undefined;
+  const ms = Number(value);
+  return Number.isFinite(ms) && ms > 0 ? ms : undefined;
+}
+
 export interface DebugHook {
   /** Drops the WebGL context, as iPadOS does under memory pressure. */
   loseContext(): void;

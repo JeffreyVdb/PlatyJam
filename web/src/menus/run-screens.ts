@@ -42,7 +42,11 @@ function laneList(lanes: readonly number[]): string {
 
 const lanesWord = (lanes: readonly number[]) => (lanes.length > 1 ? 'lanes' : 'lane');
 
-function sheet(className: string): { node: HTMLElement; card: HTMLElement; title: HTMLElement } {
+export function sheet(className: string): {
+  node: HTMLElement;
+  card: HTMLElement;
+  title: HTMLElement;
+} {
   const node = el('section', `game-sheet ${className}`.trim());
   node.setAttribute('role', 'dialog');
   node.setAttribute('aria-modal', 'true');

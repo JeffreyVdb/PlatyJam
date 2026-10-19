@@ -2059,3 +2059,40 @@ body {
     opacity: 0;
   }
 }
+
+/* ---- Delayed sound (PLA-10) ---- */
+
+.game-card-actions--stack {
+  flex-direction: column;
+  flex-wrap: nowrap;
+}
+
+.game-card-actions--stack .hud-button {
+  flex: 0 0 auto;
+  min-height: 52px;
+  font-size: 1.0625rem;
+}
+
+.game-card-hint {
+  margin: 20px 0 10px;
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  color: var(--foam-soft);
+  text-wrap: pretty;
+}
+
+.latency-steps {
+  margin: 0 0 18px;
+  padding-left: 1.35em;
+  font-size: 1.0625rem;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.latency-step + .latency-step {
+  margin-top: 8px;
+}
+
+.game-card-title:focus-visible {
+  outline: none;
+}

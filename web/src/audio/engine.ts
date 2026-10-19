@@ -114,6 +114,19 @@ export interface AudioEngine {
   resumeClock(): void;
   /** Stops everything playing on the engine, with a short fade (emits `silenced`). */
   silence(fadeMs?: number): void;
+  /**
+   * How late the player hears what the context plays, in milliseconds (the context
+   * reports seconds; this is the one place they are converted). `undefined` when
+   * unknown: the browser has no `outputLatency`, the value is not a positive number
+   * (WebKit says 0 until the context renders), or the context is not running.
+   */
+  outputLatency(): number | undefined;
+  /**
+   * Debug (`?debug`): reports this many ms from `outputLatency()` instead of the
+   * context's own reading, still `undefined` while the context is not running.
+   * `undefined` goes back to the real reading.
+   */
+  setDebugOutputLatency(ms: number | undefined): void;
   /** Debug: interrupts as backgrounding would. `stuck` makes the next tap recreate. */
   simulateInterruption(options?: { stuck?: boolean }): void;
   debugState(): AudioEngineDebugState;
@@ -194,6 +207,7 @@ export function createAudioEngine({
   let masterVolume = 1;
   let removeUnlock = noop;
   let unlockedBy: string | undefined;
+  let debugOutputLatencyMs: number | undefined;
   const unlockAttempts: Record<string, number> = {};
 
   const clock = createSongClock(() => ctx.currentTime);
@@ -204,6 +218,10 @@ export function createAudioEngine({
     nowMs,
     offsets: () => offsets,
   });
+
+  /** `outputLatency` in seconds as the context reports it; missing in older browsers. */
+  const contextOutputLatency = () =>
+    (ctx as Partial<Pick<AudioContext, 'outputLatency'>>).outputLatency;
 
   const phase = (): EnginePhase => (!unlocked ? 'locked' : interrupted ? 'interrupted' : 'running');
 
@@ -394,6 +412,17 @@ export function createAudioEngine({
       if (!unlocked) return;
       interrupt('simulated');
       if (stuck) needsRecreate = true;
+    },
+
+    outputLatency() {
+      if (ctx.state !== 'running') return undefined;
+      const seconds = contextOutputLatency();
+      const ms = debugOutputLatencyMs ?? (typeof seconds === 'number' ? seconds * 1000 : undefined);
+      return ms !== undefined && Number.isFinite(ms) && ms > 0 ? ms : undefined;
+    },
+
+    setDebugOutputLatency(ms) {
+      debugOutputLatencyMs = ms;
     },
 
     debugState() {

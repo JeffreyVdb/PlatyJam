@@ -1,8 +1,8 @@
+import { shouldWarn } from '../audio/latency-warning';
 import type { LatencyOffsets } from '../audio/timeline';
 import type { CatalogSong } from '../catalog/schema';
 import type { Credits } from '../credits/schema';
 import { type GameSession, isRunActive, type SessionState } from '../game/session-contract';
-import type { Settings } from '../save/save-data';
 import type { RecordedResults, SaveStore } from '../save/save-store';
 import type { ChartCache } from './chart-cache';
 import {
@@ -16,6 +16,12 @@ import {
   type View,
   viewFor,
 } from './flow';
+import {
+  createLatencyDialog,
+  detectSwitchPlatform,
+  type LatencyWatchView,
+  type SwitchPlatform,
+} from './latency-dialog';
 import { createCountdownScreen, createPauseScreen, createResultsScreen } from './run-screens';
 import { createCreditsScreen, createHomeScreen, type Screen } from './screens';
 import { createSettingsScreen, type VolumeKind } from './settings-screen';
@@ -49,6 +55,15 @@ export interface MenusOptions {
   offsets: () => Readonly<LatencyOffsets>;
   /** Opens the latency calibration; `onClose` runs when it closes. */
   openCalibration: (onClose: () => void) => void;
+  /**
+   * The audio output latency. Before a song starts, a delayed output (wireless
+   * headphones) shows a warning; an unknown one never does.
+   */
+  latency: LatencyWatchView & { sampleNow(): void };
+  /** Whether the sound is running now: "Use speakers" only starts the song then. */
+  audioRunning: () => boolean;
+  /** Which instructions "Use speakers" shows. Detected from the browser by default. */
+  platform?: SwitchPlatform;
   /** Reloads the page: the way to fetch piano notes that failed at launch. */
   reload: () => void;
   online?: () => boolean;
@@ -77,6 +92,9 @@ export function createMenus({
   setVolume,
   offsets,
   openCalibration,
+  latency,
+  audioRunning,
+  platform = detectSwitchPlatform(navigator),
   reload,
   online = () => navigator.onLine,
 }: MenusOptions): Menus {
@@ -123,13 +141,31 @@ export function createMenus({
     go(next);
   };
 
-  /** Inside the gesture: `start()` must run synchronously in it. */
+  const startRun = () => {
+    session.start();
+    // Song select opens on this song next time, even if it was never picked.
+    store.updateSettings({ ...selection });
+  };
+
+  /**
+   * Inside the gesture: `start()` must run synchronously in it. A delayed output shows
+   * the warning instead, judged from the readings taken before this tap plus one now.
+   * Nothing waits: an unknown or on-time output starts the song at once, as does a
+   * first Play before enough readings arrived (the unlock primes them).
+   */
   const play = () => {
     const action = currentPlay().action;
     if (action === 'start') {
-      session.start();
-      // Song select opens on this song next time, even if it was never picked.
-      store.updateSettings({ ...selection });
+      latency.sampleNow();
+      const measured = latency.latencyMs();
+      if (
+        measured !== undefined &&
+        shouldWarn(latency.verdict(), measured, store.settings.latencyWarningMutedAtMs)
+      ) {
+        openLatencyDialog(measured);
+        return;
+      }
+      startRun();
     } else if (action === 'retry') {
       ensureLoaded(true);
     } else if (action === 'reload') {
@@ -160,6 +196,24 @@ export function createMenus({
     renderPlay();
   };
 
+  // ---- The delayed-sound dialog ----
+
+  const closeLatencyDialog = (restoreFocus: boolean) => {
+    if (!latencyDialog.isOpen) return;
+    latencyDialog.close();
+    latencyDialog.node.remove();
+    songSelect.node.inert = false;
+    // A touch does not focus the Play tile, so focus goes back there, not to an opener.
+    if (restoreFocus) songSelect.playButton.focus({ preventScroll: true });
+  };
+
+  function openLatencyDialog(measuredMs: number) {
+    songSelect.node.inert = true;
+    latencyDialog.open(measuredMs);
+    root.append(latencyDialog.node);
+    latencyDialog.focusTarget().focus({ preventScroll: true });
+  }
+
   // ---- Screens ----
 
   const home = createHomeScreen({
@@ -181,10 +235,41 @@ export function createMenus({
       openFrom('credits', songSelect.creditsButton);
     },
   });
+  const latencyDialog = createLatencyDialog({
+    watch: latency,
+    platform,
+    // The Play anyway buttons run in their own tap's gesture, which starts the song.
+    onPlayAnyway: () => {
+      closeLatencyDialog(false);
+      startRun();
+    },
+    onPlayAndMute: (latencyMs) => {
+      store.updateSettings({ latencyWarningMutedAtMs: Math.round(latencyMs) });
+      closeLatencyDialog(false);
+      startRun();
+    },
+    // No gesture here: only start while the sound runs, else leave the player on Play.
+    onSwitched: () => {
+      const canStart = audioRunning() && currentPlay().action === 'start';
+      closeLatencyDialog(!canStart);
+      if (canStart) startRun();
+    },
+    onCalibrate: (onClose) => {
+      calibrating = true;
+      openCalibration(() => {
+        calibrating = false;
+        onClose();
+      });
+    },
+    onCancel: () => {
+      closeLatencyDialog(true);
+    },
+  });
   const settingsScreen = createSettingsScreen({
     settings: () => store.settings,
     offsets,
-    onChange: (patch: Partial<Settings>) => {
+    outputLatency: () => latency.latencyMs(),
+    onChange: (patch) => {
       store.updateSettings(patch);
       ensureLoaded();
     },
@@ -242,6 +327,8 @@ export function createMenus({
 
   const render = () => {
     const view = viewFor(menu, session.state);
+    // The song list went away under the dialog (an error, say): it has nothing to ask.
+    if (view !== 'songs') closeLatencyDialog(false);
     if (view === 'songs') renderPlay();
     if (view === 'pause') pause.refresh();
     if (view === 'countdown') countdown.refresh();
@@ -299,6 +386,7 @@ export function createMenus({
 
   const poll = setInterval(() => {
     if (shown === 'songs' && session.state === 'loading') renderPlay();
+    if (shown === 'settings') settingsScreen.refreshOutputLatency();
   }, LOADING_POLL_MS);
 
   const onConnectivity = () => {
@@ -313,6 +401,14 @@ export function createMenus({
     if (event.repeat || event.defaultPrevented || calibrating) return;
     // The calibration closes itself on Escape before this runs: that key was its own.
     if (event.target instanceof Element && event.target.closest('.calibration')) return;
+    // The dialog answers its own keys; Escape must not go back to Home behind it.
+    if (latencyDialog.isOpen) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        latencyDialog.escape();
+      }
+      return;
+    }
     const view = viewFor(menu, session.state);
     if (event.key === 'Escape') {
       if (view === 'play') {
@@ -352,6 +448,7 @@ export function createMenus({
     dispose() {
       for (const off of offs) off();
       clearInterval(poll);
+      closeLatencyDialog(false);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('online', onConnectivity);
       window.removeEventListener('offline', onConnectivity);

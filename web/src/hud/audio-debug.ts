@@ -1,5 +1,6 @@
 import { loadBackingTrack } from '../audio/backing-track';
 import type { GameAudio } from '../audio/game-audio';
+import type { DeviceChanges, OutputLatencyWatch } from '../audio/latency-watch';
 import { createSyncTest, type SyncSource } from '../audio/sync-test';
 
 /**
@@ -10,6 +11,12 @@ import { createSyncTest, type SyncSource } from '../audio/sync-test';
 export interface AudioDebugOptions {
   audio: GameAudio;
   openCalibration: () => void;
+  /** The delayed-sound check, for the verdict readout. */
+  latency?: OutputLatencyWatch;
+  /** `navigator.mediaDevices`: its `devicechange` events are logged. */
+  devices?: DeviceChanges | undefined;
+  /** The latency `?debug&latency=` faked at launch, in ms. */
+  fakedLatencyMs?: number | undefined;
 }
 
 const TEMPOS = [0.75, 1, 1.25, 1.5] as const;
@@ -62,6 +69,14 @@ function choice<T extends string | number>(
 const ms = (seconds: number | undefined) =>
   seconds === undefined ? 'n/a' : `${(seconds * 1000).toFixed(1)} ms`;
 
+/** The fake-latency choices; 0 is the real reading. */
+const FAKE_LATENCIES = [0, 20, 150, 250, 400] as const;
+/** How many device changes the panel remembers. */
+const DEVICE_LOG_SIZE = 5;
+
+const stamp = (date: Date) =>
+  `${date.toLocaleTimeString('en-GB')}.${String(date.getMilliseconds()).padStart(3, '0')}`;
+
 const clockText = (songMs: number) => {
   const total = Math.max(0, Math.floor(songMs / 1000));
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
@@ -70,6 +85,9 @@ const clockText = (songMs: number) => {
 export function createAudioDebugSection({
   audio,
   openCalibration,
+  latency,
+  devices,
+  fakedLatencyMs,
 }: AudioDebugOptions): HTMLElement {
   const { engine, piano, accompaniment, backing, samples } = audio;
   const sync = createSyncTest(audio, {
@@ -103,6 +121,23 @@ export function createAudioDebugSection({
     button('Simulate stuck pause', () => {
       engine.simulateInterruption({ stuck: true });
     }),
+  );
+
+  // Output latency: fake it, to see the delayed-sound warning without Bluetooth.
+  const fakeOptions: number[] = [...FAKE_LATENCIES];
+  if (fakedLatencyMs !== undefined && !fakeOptions.includes(fakedLatencyMs)) {
+    fakeOptions.push(fakedLatencyMs);
+  }
+  let faked = fakedLatencyMs;
+  const fakeLatency = choice(
+    'Fake output latency',
+    fakeOptions.map((value) => ({ value, text: value === 0 ? 'Real' : `${value} ms` })),
+    fakedLatencyMs ?? 0,
+    (value) => {
+      faked = value === 0 ? undefined : value;
+      engine.setDebugOutputLatency(faked);
+      refresh();
+    },
   );
 
   // Tap pad: the sound starts in the pointerdown handler, with nothing in between.
@@ -168,7 +203,20 @@ export function createAudioDebugSection({
     syncReadout,
   );
 
-  section.append(status, actions, pad, syncBox);
+  section.append(status, actions, fakeLatency, pad, syncBox);
+
+  // Device changes: whether (and when) the browser reports a route change.
+  const deviceChanges: string[] = [];
+  const onDeviceChange = () => {
+    const at = stamp(new Date());
+    const now = engine.outputLatency();
+    deviceChanges.unshift(
+      `${at} latency ${now === undefined ? 'unknown' : `${now.toFixed(0)} ms`}`,
+    );
+    deviceChanges.length = Math.min(deviceChanges.length, DEVICE_LOG_SIZE);
+    refresh();
+  };
+  devices?.addEventListener('devicechange', onDeviceChange);
 
   // Drawn every frame from songTime(), never from frame counts.
   const paintSync = () => {
@@ -194,6 +242,12 @@ export function createAudioDebugSection({
 
   const refresh = () => {
     const s = engine.debugState();
+    const used = engine.outputLatency();
+    const usedText = [
+      used === undefined ? 'unknown' : `${used.toFixed(1)} ms`,
+      faked === undefined ? '' : ' (faked)',
+      latency ? `, ${latency.verdict()}` : '',
+    ].join('');
     const unlocks = Object.entries(s.unlockAttempts)
       .map(([type, count]) => `${type} ${count}`)
       .join(', ');
@@ -201,6 +255,10 @@ export function createAudioDebugSection({
     status.textContent = [
       `Engine ${s.phase}, context ${s.contextState}, ${s.sampleRate} Hz`,
       `Base latency ${ms(s.baseLatency)}, output latency ${ms(s.outputLatency)}`,
+      `Output latency now: ${usedText}`,
+      devices
+        ? `Device changes: ${deviceChanges.length ? `\n  ${deviceChanges.join('\n  ')}` : 'none yet'}`
+        : 'Device changes: not reported by this browser',
       `Audio session: ${s.audioSession}`,
       `Unlock attempts: ${unlocks || 'none'}${s.unlockedBy ? `; unlocked by ${s.unlockedBy}` : ''}`,
       `Piano samples ${samples.progress.loaded} of ${samples.progress.total}${samples.progress.failed ? `, ${samples.progress.failed} failed` : ''}`,

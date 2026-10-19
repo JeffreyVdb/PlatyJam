@@ -1,3 +1,4 @@
+import { approximateMs } from '../audio/latency-warning';
 import type { LatencyOffsets } from '../audio/timeline';
 import type { FailMode } from '../game/session-contract';
 import type { Settings } from '../save/save-data';
@@ -11,8 +12,12 @@ export interface SettingsScreenOptions {
   settings: () => Readonly<Settings>;
   /** The latency offsets in use, for the Timing line. */
   offsets: () => Readonly<LatencyOffsets>;
-  /** Fail mode or scroll speed: applies to the next run. */
-  onChange: (patch: Partial<Pick<Settings, 'failMode' | 'scrollDurationMs'>>) => void;
+  /** The audio output latency in ms, `undefined` when unknown. */
+  outputLatency: () => number | undefined;
+  /** Fail mode or scroll speed (applies to the next run), or the delayed-sound warning. */
+  onChange: (
+    patch: Partial<Pick<Settings, 'failMode' | 'scrollDurationMs' | 'latencyWarningMutedAtMs'>>,
+  ) => void;
   /** While a volume slider moves: apply it to the sound at once. */
   onVolume: (kind: VolumeKind, volume: number) => void;
   /** A volume slider was let go: save it. */
@@ -23,6 +28,8 @@ export interface SettingsScreenOptions {
 
 export interface SettingsScreen extends Screen {
   refresh(): void;
+  /** Only the audio output latency line: it moves while the screen is open. */
+  refreshOutputLatency(): void;
   readonly calibrateButton: HTMLElement;
 }
 
@@ -98,6 +105,15 @@ export function createSettingsScreen(options: SettingsScreenOptions): SettingsSc
     'The notes PlatyJam plays along with you. Your own notes follow Volume.',
   );
 
+  const outputLatency = el('p', 'settings-hint');
+  const mutedHint = el('p', 'settings-hint');
+  const unmute = button('Warn me again', 'quiet', () => {
+    options.onChange({ latencyWarningMutedAtMs: null });
+    refresh();
+  });
+  const muted = el('div', 'settings-muted');
+  muted.append(mutedHint, unmute);
+
   const timing = el('p', 'settings-hint');
   const calibrateButton = button('Calibrate timing', 'quiet', options.onCalibrate);
   const timingText = el(
@@ -109,13 +125,26 @@ export function createSettingsScreen(options: SettingsScreenOptions): SettingsSc
   const column = el('div', 'screen-column');
   column.append(
     group('Playing', failMode.node, failHint, scroll.node, scrollHint),
-    group('Sound', master.node, accompaniment.node, accompanimentHint),
+    group('Sound', master.node, accompaniment.node, accompanimentHint, outputLatency, muted),
     group('Timing', timingText, timing, calibrateButton),
   );
   frame.body.append(column);
 
+  const refreshOutputLatency = () => {
+    const ms = options.outputLatency();
+    const text = `Audio output latency: ${ms === undefined ? 'unknown' : `${Math.round(ms)} ms`}`;
+    if (outputLatency.textContent !== text) outputLatency.textContent = text;
+  };
+
   const refresh = () => {
     const settings = options.settings();
+    refreshOutputLatency();
+    const mutedAt = settings.latencyWarningMutedAtMs;
+    muted.hidden = mutedAt === null;
+    mutedHint.textContent =
+      mutedAt === null
+        ? ''
+        : `PlatyJam won't warn you before a song when the sound is delayed by about ${approximateMs(mutedAt)} ms.`;
     failMode.set(settings.failMode);
     failHint.textContent = FAIL_MODE_HINTS[settings.failMode];
     const speed = nearestScrollSpeed(settings.scrollDurationMs);
@@ -131,5 +160,11 @@ export function createSettingsScreen(options: SettingsScreenOptions): SettingsSc
   };
   refresh();
 
-  return { node: frame.section, focusTarget: () => frame.heading, refresh, calibrateButton };
+  return {
+    node: frame.section,
+    focusTarget: () => frame.heading,
+    refresh,
+    refreshOutputLatency,
+    calibrateButton,
+  };
 }

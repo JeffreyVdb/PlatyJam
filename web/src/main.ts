@@ -1,5 +1,5 @@
 import './style.css';
-import { installDebugHook, isDebugEnabled } from './app/debug';
+import { debugOutputLatency, installDebugHook, isDebugEnabled } from './app/debug';
 import { installPageLifecycle, lifecycle } from './app/lifecycle';
 import { setupServiceWorker } from './app/pwa';
 import { setupStoragePersistence } from './app/storage';
@@ -7,6 +7,11 @@ import { createSafeAreaProbe } from './app/safe-area';
 import { installTouchGuards } from './app/touch-guards';
 import { watchViewport } from './app/viewport';
 import { createGameAudio, type GameAudio } from './audio/game-audio';
+import {
+  type DeviceChanges,
+  type OutputLatencyWatch,
+  watchOutputLatency,
+} from './audio/latency-watch';
 import { openCalibration } from './calibration/calibration-overlay';
 import catalogJson from './catalog/catalog.json';
 import debugCatalogJson from './catalog/debug-catalog.json';
@@ -112,6 +117,7 @@ function startGame(
   audio: GameAudio,
   scene: ReturnType<typeof createGameStage>,
   store: SaveStore,
+  latency: OutputLatencyWatch,
   debug: boolean,
 ): GameplaySession {
   const session = createGameplaySession({ audio, bus: lifecycle });
@@ -161,10 +167,18 @@ function startGame(
     },
     offsets: () => audio.engine.offsets,
     openCalibration: calibrate,
+    latency,
+    audioRunning: () => audio.engine.phase === 'running',
     reload,
   });
   return session;
 }
+
+/** Absent where the page is not a secure context or the browser has no media devices. */
+const deviceChanges = (): DeviceChanges | undefined =>
+  (navigator.mediaDevices as MediaDevices | undefined)?.addEventListener
+    ? navigator.mediaDevices
+    : undefined;
 
 function main() {
   const stage = required('#stage');
@@ -236,17 +250,16 @@ function main() {
     scene.rebuild();
   });
 
-  if (audio) {
-    session = startGame(
-      stage,
-      hudRoot,
-      hud,
-      reload,
-      audio,
-      scene,
-      store,
-      isDebugEnabled(window.location.search),
-    );
+  // ?debug&latency=250 fakes a delayed output (no Bluetooth needed).
+  const debug = isDebugEnabled(window.location.search);
+  audio?.engine.setDebugOutputLatency(debugOutputLatency(window.location.search));
+  // From the first unlock on, so the first Play already knows the output.
+  const latency = audio
+    ? watchOutputLatency({ engine: audio.engine, bus: lifecycle, devices: deviceChanges() }).watch
+    : undefined;
+
+  if (audio && latency) {
+    session = startGame(stage, hudRoot, hud, reload, audio, scene, store, latency, debug);
   }
 
   watchViewport({
@@ -276,7 +289,7 @@ function main() {
     playHud?.update();
   });
 
-  if (isDebugEnabled(window.location.search)) {
+  if (debug) {
     const hook = installDebugHook(window, host, lifecycle, () => scene.builds);
     const sections: HTMLElement[] = [];
     hook.session = session;
@@ -289,6 +302,9 @@ function main() {
           openCalibration: () => {
             calibrate();
           },
+          latency,
+          devices: deviceChanges(),
+          fakedLatencyMs: debugOutputLatency(window.location.search),
         }),
       );
     }
