@@ -43,4 +43,20 @@ describe('lane layout', () => {
     expect(laneForPoint(0.5, 2.5, { halfWidth: half, far: 14, near: 2 })).toBeUndefined();
     expect(laneForPoint(0.5, -15, { halfWidth: half, far: 14, near: 2 })).toBeUndefined();
   });
+
+  it('keeps lane edges on the visible dividers, whatever the slack', () => {
+    const bounds = { halfWidth: 2, slack: 0.15, far: 14, near: 2 };
+    // Dividers at -1, 0 and 1: a touch either side lands in the lane it is drawn in.
+    expect(laneForPoint(-1.02, 0, bounds)).toBe(0);
+    expect(laneForPoint(-0.98, 0, bounds)).toBe(1);
+    expect(laneForPoint(-0.02, 0, bounds)).toBe(1);
+    expect(laneForPoint(0.02, 0, bounds)).toBe(2);
+    expect(laneForPoint(0.98, 0, bounds)).toBe(2);
+    expect(laneForPoint(1.02, 0, bounds)).toBe(3);
+    // The slack gives the outer lanes a margin beyond their drawn edges, and no more.
+    expect(laneForPoint(-2.1, 0, bounds)).toBe(0);
+    expect(laneForPoint(2.1, 0, bounds)).toBe(3);
+    expect(laneForPoint(-2.2, 0, bounds)).toBeUndefined();
+    expect(laneForPoint(2.2, 0, bounds)).toBeUndefined();
+  });
 });

@@ -19,7 +19,6 @@ import {
   ShaderMaterial,
   Shape,
   ShapeGeometry,
-  SRGBColorSpace,
   Vector2,
   Vector3,
   type BufferGeometry,
@@ -34,6 +33,7 @@ import { headDeadline } from '../game/judgment';
 import { prefersReducedMotion } from '../hud/motion';
 import { HEAD, TAIL } from '../game/simulation';
 import { fitCamera, type CameraFit } from './camera-fit';
+import { createHighwayMaterial, EDGE_MARGIN } from './highway-material';
 import { firstVisibleTile, laneForPoint, longestHold, tileDepth } from './lane-layout';
 
 /**
@@ -41,7 +41,8 @@ import { firstVisibleTile, laneForPoint, longestHold, tileDepth } from './lane-l
  * as a pure function of song time, and the feedback for every hit.
  *
  * Draw calls stay at eleven: water, highway, lane glow, two hit-line layers, hold
- * bodies, double bridges, tiles, flashes, ripples and droplets. Everything that
+ * bodies, double bridges, tiles, flashes, ripples and droplets. The highway is one
+ * analytic-antialiasing shader (`highway-material.ts`), not a texture. Everything that
  * repeats is an InstancedMesh with a fixed capacity drawn up to `count`; nothing is
  * allocated per frame. `rebuild()` disposes and recreates every GPU resource, which
  * a lost WebGL context requires.
@@ -104,28 +105,6 @@ function roundedTileShape(width: number, depth: number, radius: number): Shape {
   shape.lineTo(x, y + radius);
   shape.quadraticCurveTo(x, y, x + radius, y);
   return shape;
-}
-
-/** Lane surface: lane colour with darker dividers, baked so the highway is one draw. */
-function createLaneTexture(): DataTexture {
-  const width = LANES * 32;
-  const data = new Uint8Array(width * 4);
-  const lane = RIVER.clone().convertLinearToSRGB();
-  const divider = RIVER_DEEP.clone().convertLinearToSRGB();
-  for (let x = 0; x < width; x += 1) {
-    const edge = x % 32;
-    const colour = edge === 0 || edge === 31 ? divider : lane;
-    data.set(
-      [Math.round(colour.r * 255), Math.round(colour.g * 255), Math.round(colour.b * 255), 255],
-      x * 4,
-    );
-  }
-  const texture = new DataTexture(data, width, 1, RGBAFormat);
-  texture.magFilter = LinearFilter;
-  texture.minFilter = LinearFilter;
-  texture.colorSpace = SRGBColorSpace;
-  texture.needsUpdate = true;
-  return texture;
 }
 
 /** A brightness ramp along the plane's v axis, white on black, for soft additive glows. */
@@ -305,7 +284,6 @@ export function createGameStage({
   const build = (): Resources => {
     builds += 1;
     const root = new Object3D();
-    const laneTexture = createLaneTexture();
     const glowTexture = createFalloffTexture((v) =>
       v < 0.04 ? (v / 0.04) ** 2 : (1 - (v - 0.04) / 0.96) ** 2,
     );
@@ -336,11 +314,21 @@ export function createGameStage({
     waterMesh.renderOrder = -1;
     root.add(waterMesh);
 
-    const highwayGeometry = new PlaneGeometry(HIGHWAY_WIDTH, HIGHWAY_FAR + HIGHWAY_NEAR);
+    const highwayGeometry = new PlaneGeometry(
+      HIGHWAY_WIDTH + 2 * EDGE_MARGIN,
+      HIGHWAY_FAR + HIGHWAY_NEAR,
+    );
     highwayGeometry.rotateX(-Math.PI / 2);
     highwayGeometry.translate(0, 0, (HIGHWAY_NEAR - HIGHWAY_FAR) / 2);
-    const highwayMaterial = new MeshBasicMaterial({ map: laneTexture });
-    root.add(new Mesh(highwayGeometry, highwayMaterial));
+    const highwayMaterial = createHighwayMaterial({
+      lane: RIVER,
+      divider: RIVER_DEEP,
+      near: HIGHWAY_NEAR,
+    });
+    const highwayMesh = new Mesh(highwayGeometry, highwayMaterial);
+    // Alpha-blended, so it draws first among the transparent layers that sit on it.
+    highwayMesh.renderOrder = -1;
+    root.add(highwayMesh);
 
     // Per-lane glow: held lanes, hits, and red for a snag. Additive: black is invisible.
     const glowGeometry = new PlaneGeometry(LANE_WIDTH * 0.94, 4);
@@ -439,7 +427,7 @@ export function createGameStage({
         rippleMaterial,
         dropletMaterial,
       ],
-      textures: [laneTexture, glowTexture, haloTexture, dotTexture],
+      textures: [glowTexture, haloTexture, dotTexture],
       water,
       glows,
       tiles,
@@ -779,7 +767,8 @@ export function createGameStage({
       raycaster.setFromCamera(pointer, camera);
       if (!raycaster.ray.intersectPlane(ground, hit)) return undefined;
       return laneForPoint(hit.x, hit.z, {
-        halfWidth: HIGHWAY_WIDTH / 2 + TOUCH_SLACK.side,
+        halfWidth: HIGHWAY_WIDTH / 2,
+        slack: TOUCH_SLACK.side,
         far: HIGHWAY_FAR,
         near: HIGHWAY_NEAR + TOUCH_SLACK.near,
       });

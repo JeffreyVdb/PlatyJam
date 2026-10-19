@@ -35,17 +35,23 @@ export function firstVisibleTile(tiles: readonly Tile[], fromMs: number, longest
 }
 
 export interface HighwayBounds {
-  /** Half the highway's width, world units. */
+  /** Half the width of the four lanes, world units: where the visible dividers sit. */
   halfWidth: number;
+  /** How far beyond the outer lane edges a touch still counts, for the outer lanes. */
+  slack?: number;
   /** How far the lanes run up from the hit line. */
   far: number;
   /** How far the touchable surface reaches below the hit line. */
   near: number;
 }
 
-/** The lane under a point on the highway plane (x across, z along), or undefined. */
+/**
+ * The lane under a point on the highway plane (x across, z along), or undefined.
+ * Lane edges are the visible dividers; the slack only widens the outer lanes.
+ */
 export function laneForPoint(x: number, z: number, bounds: HighwayBounds): number | undefined {
-  if (Math.abs(x) > bounds.halfWidth || z < -bounds.far || z > bounds.near) return undefined;
+  const reach = bounds.halfWidth + (bounds.slack ?? 0);
+  if (Math.abs(x) > reach || z < -bounds.far || z > bounds.near) return undefined;
   const lane = Math.floor(((x + bounds.halfWidth) / (2 * bounds.halfWidth)) * LANES);
   return Math.min(LANES - 1, Math.max(0, lane));
 }
