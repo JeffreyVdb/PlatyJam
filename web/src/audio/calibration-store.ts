@@ -1,24 +1,18 @@
+import { defaultStorage, type StorageAccess, STORAGE_KEYS } from '../save/save-store';
 import { clampOffsets } from './calibration';
 import type { LatencyOffsets } from './timeline';
 
 /**
- * The saved calibration, one versioned record under one key, so PLA-7's settings
- * store can migrate it as a unit.
+ * The saved calibration: one versioned record under its own key, next to the save
+ * (`save/save-store.ts` lists every key), so it can be migrated as a unit.
  */
-export const CALIBRATION_KEY = 'platyjam.calibration.v1';
+export const CALIBRATION_KEY = STORAGE_KEYS.calibration;
 
 export interface StoredCalibration extends LatencyOffsets {
   version: 1;
   /** ISO 8601. */
   calibratedAt: string;
 }
-
-type KeyValueStorage = Pick<Storage, 'getItem' | 'setItem'>;
-
-/** A getter, because touching `window.localStorage` can itself throw (blocked storage). */
-export type StorageAccess = () => KeyValueStorage | null;
-
-const defaultStorage: StorageAccess = () => window.localStorage;
 
 function parse(raw: string): StoredCalibration | null {
   const value: unknown = JSON.parse(raw);
