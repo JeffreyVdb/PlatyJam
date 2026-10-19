@@ -131,5 +131,38 @@ describe('createTimeline', () => {
       // Held at 1500; at −200 ms a tap received as it stopped counts 200 ms (150 chart ms) later.
       expect(timeline.judgeSongTimeNow()).toBeCloseTo(1500 + 150, 9);
     });
+
+    it('keeps the judge time from just before pause() stopped the clock', () => {
+      const { state, clock, timeline, advance } = world();
+      // What is heard trails the context clock by 40 ms.
+      state.perfMs -= 40;
+      state.offsets.inputOffsetMs = 200;
+      clock.setTempo(1.5);
+      clock.start(0);
+      advance(2);
+      const before = timeline.judgeSongTimeNow();
+      timeline.pause();
+      advance(5);
+      expect(clock.isRunning).toBe(false);
+      expect(clock.position()).toBeCloseTo(3000, 9);
+      // Heard 40 ms behind the clock and tapped 200 ms before received: 240 real ms back.
+      expect(before).toBeCloseTo(3000 - 240 * 1.5, 9);
+      expect(timeline.judgeSongTimeNow()).toBeCloseTo(before, 9);
+    });
+
+    it('forgets that judge time once the clock moves again', () => {
+      const { state, clock, timeline, advance } = world();
+      // What is heard trails the context clock by 40 ms.
+      state.perfMs -= 40;
+      state.offsets.inputOffsetMs = 200;
+      clock.start(0);
+      advance(2);
+      timeline.pause();
+      clock.resume();
+      advance(1);
+      clock.pause();
+      // Paused behind the timeline's back: only the held position is known.
+      expect(timeline.judgeSongTimeNow()).toBeCloseTo(3000 - 200, 9);
+    });
   });
 });

@@ -321,7 +321,7 @@ export function createGameplaySession({
     if (!sim) return;
     clearTimer();
     // In input time, as inputs are judged: read before the clock stops, or from the
-    // held position when the audio already stopped it.
+    // value the timeline kept when the audio already stopped it.
     const settledUpTo = engine.timeline.judgeSongTimeNow();
     engine.clock.pause();
     if (isPlaying()) {

@@ -255,7 +255,8 @@ export function createAudioEngine({
       return;
     }
     interrupted = true;
-    clock.pause();
+    // Through the timeline, so the game can still settle up to what the player heard.
+    timeline.pause();
     events.emit('interrupted', { reason });
     suspendAfterFade(attempt);
   }

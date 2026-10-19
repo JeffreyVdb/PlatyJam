@@ -477,7 +477,7 @@ describe('game session', () => {
       session.start();
       frames(1500);
       fake.engine.phase = 'interrupted';
-      fake.engine.clock.pause();
+      fake.engine.timeline.pause();
       fake.engine.events.emit('interrupted', { reason: 'background' });
       expect(session.pauseInfo?.reason).toBe('interrupted');
       expect(session.pauseInfo?.audio).toBe('interrupted');
@@ -584,7 +584,7 @@ describe('game session', () => {
             session.start();
             toSong(rawFor(1000, offsetMs));
             fake.engine.phase = 'interrupted';
-            fake.engine.clock.pause();
+            fake.engine.timeline.pause();
             fake.engine.events.emit('interrupted', { reason: 'background' });
             expect(session.state).toBe('paused');
             expect(session.stats()).toMatchObject({ miss: 0 });
@@ -623,6 +623,100 @@ describe('game session', () => {
             expect(session.stats()).toMatchObject({ perfect: 2, miss: 0 });
           },
         );
+
+        describe.each([200, -200, 0])(
+          'when the audio stops the clock, heard 40 ms late (offset %s)',
+          (offsetMs) => {
+            const lagMs = 40;
+            /** Song ms of the clock when a tap received now is judged at `judgeMs`. */
+            const clockFor = (judgeMs: number) => judgeMs + (offsetMs + lagMs) * tempo;
+            /** What the engine does on an interruption: it stops the clock, then says so. */
+            const interrupt = () => {
+              fake.engine.phase = 'interrupted';
+              fake.engine.timeline.pause();
+              fake.engine.events.emit('interrupted', { reason: 'background' });
+            };
+            const recoverAll = async () => {
+              session.resume();
+              fake.engine.phase = 'running';
+              fake.engine.events.emit('recovered', { recreated: false });
+              await vi.advanceTimersByTimeAsync(COUNTDOWN_BEAT_MS * 3);
+              expect(session.state).toBe('playing');
+            };
+            beforeEach(() => {
+              fake.inputOffsetMs = offsetMs;
+              fake.outputLagMs = lagMs;
+            });
+
+            it('keeps a head still inside its window open, then judges it normally', async () => {
+              await loaded([tap(1000, 0), tap(3000, 1)], { tempo });
+              session.start();
+              // 100 real ms late in input time: inside the window, under the lag past it.
+              toSong(clockFor(1000 + 100 * tempo));
+              interrupt();
+              expect(session.state).toBe('paused');
+              expect(session.stats()).toMatchObject({ miss: 0 });
+              await recoverAll();
+              press('a', 0);
+              expect(session.stats()).toMatchObject({ good: 1, miss: 0 });
+            });
+
+            it('settles a Miss already due in input time', async () => {
+              await loaded([tap(1000, 0), tap(3000, 1)], { tempo });
+              session.start();
+              toSong(clockFor(1000 + 130 * tempo));
+              expect(session.state).toBe('playing');
+              interrupt();
+              expect(session.state).toBe('failing');
+              expect(session.stats()).toMatchObject({ miss: 1 });
+            });
+
+            it('completes a hold held past its tail in input time', async () => {
+              await loaded([hold(1000, 0, 1000)], { tempo });
+              session.start();
+              toSong(clockFor(1000));
+              press('a', 0);
+              toSong(clockFor(2000 + 20 * tempo));
+              expect(session.stats()).toMatchObject({ perfect: 1 });
+              interrupt();
+              expect(session.stats()).toMatchObject({ perfect: 2, miss: 0 });
+              expect(session.pauseInfo?.heldLanes).toEqual([]);
+              await recoverAll();
+              expect(session.stats()).toMatchObject({ perfect: 2, miss: 0 });
+            });
+          },
+        );
+      },
+    );
+
+    it.each(['press', 'pause', 'interrupt'] as const)(
+      'keeps the late boundary of input time through a %s, 40 ms output lag and +200 ms input',
+      async (action) => {
+        fake.inputOffsetMs = 200;
+        fake.outputLagMs = 40;
+        await loaded([tap(1000, 0), tap(3000, 1)]);
+        session.start();
+        while (songMs() + 16 < 1340) frames(16);
+        fake.advance(1340 - songMs());
+        session.update();
+        // The clock reads 1340; a tap received now is judged at 1100, inside the late
+        // boundary (1120) of the tile at 1000.
+        expect(fake.engine.timeline.judgeSongTime(fake.perf)).toBeCloseTo(1100, 6);
+        if (action === 'press') {
+          press('a', 0);
+          expect(session.stats()).toMatchObject({ good: 1, miss: 0 });
+          expect(session.state).toBe('playing');
+          return;
+        }
+        if (action === 'pause') {
+          session.pause();
+        } else {
+          fake.engine.phase = 'interrupted';
+          fake.engine.timeline.pause();
+          fake.engine.events.emit('interrupted', { reason: 'background' });
+        }
+        expect(session.state).toBe('paused');
+        expect(session.stats()).toMatchObject({ miss: 0 });
       },
     );
 

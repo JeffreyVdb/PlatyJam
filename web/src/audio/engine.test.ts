@@ -252,6 +252,21 @@ describe('createAudioEngine', () => {
       expect(ctx().state).toBe('suspended');
     });
 
+    it('keeps the calibrated judge time from before the clock stopped', async () => {
+      const { bus, engine } = await playing(2);
+      engine.setOffsets({ audioOffsetMs: 0, inputOffsetMs: 200 });
+      // The speaker plays what the context rendered 40 ms ago (nowMs() is 0 here).
+      ctx().getOutputTimestamp = () => ({
+        contextTime: ctx().currentTime - 0.04,
+        performanceTime: 0,
+      });
+      const before = engine.timeline.judgeSongTimeNow();
+      expect(before).toBeCloseTo(2000 - 240, 6);
+      bus.emit('pause', { reason: 'hidden' });
+      expect(engine.clock.position()).toBeCloseTo(2000, 6);
+      expect(engine.timeline.judgeSongTimeNow()).toBeCloseTo(before, 6);
+    });
+
     it('treats the context going "interrupted" as an interruption', async () => {
       const { engine, events } = await playing(1);
       ctx().setState('interrupted');
