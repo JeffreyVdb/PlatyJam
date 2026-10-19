@@ -73,7 +73,7 @@ export interface LatencyDialog extends Screen {
 }
 
 const delayedText = (ms: number) =>
-  `Wireless headphones add about ${approximateMs(ms)} ms, so your notes will sound late. For the best experience, play through the device speaker.`;
+  `Wireless headphones add about ${approximateMs(ms)}\u00a0ms, so your notes will sound late. For the best experience, play through the device speaker.`;
 
 export function createLatencyDialog(options: LatencyDialogOptions): LatencyDialog {
   const { watch, platform } = options;
@@ -140,7 +140,7 @@ export function createLatencyDialog(options: LatencyDialogOptions): LatencyDialo
         ? 'The sound is on time.'
         : ms === undefined
           ? 'Checking the sound…'
-          : `Still about ${approximateMs(ms)} ms late.`;
+          : `Still about ${approximateMs(ms)}\u00a0ms late.`;
     // Only on a change, so a screen reader is not read the same line ten times a second.
     if (status.textContent !== next) status.textContent = next;
   };

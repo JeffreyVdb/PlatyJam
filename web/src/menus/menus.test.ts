@@ -700,7 +700,7 @@ describe('menus', () => {
       expect(started(session)).toEqual([]);
       expect(dialog()?.getAttribute('role')).toBe('dialog');
       expect(q('.game-card-title').textContent).toBe('Your sound is delayed');
-      expect(dialog()?.textContent).toContain(`add about ${DELAYED} ms`);
+      expect(dialog()?.textContent).toContain(`add about ${DELAYED}\u00a0ms`);
       expect(q('.screen--songs').inert).toBe(true);
       expect(document.activeElement?.textContent).toBe('Use speakers');
     });
@@ -801,9 +801,9 @@ describe('menus', () => {
         tap(inDialog('Use speakers'));
         expect(q('.game-card-title').textContent).toBe('Switch to the speaker');
         expect(dialog()?.querySelectorAll('.latency-step').length).toBeGreaterThan(0);
-        expect(q('.latency-status').textContent).toBe(`Still about ${DELAYED} ms late.`);
+        expect(q('.latency-status').textContent).toBe(`Still about ${DELAYED}\u00a0ms late.`);
         primeLatency(DELAYED + 100);
-        expect(q('.latency-status').textContent).toBe(`Still about ${DELAYED + 100} ms late.`);
+        expect(q('.latency-status').textContent).toBe(`Still about ${DELAYED + 100}\u00a0ms late.`);
       });
 
       it('goes back to the choices, from its button or Escape', () => {
