@@ -24,6 +24,28 @@
       }
     },
     {
+      "id": "beach-tropical-house",
+      "title": "Beach Tropical House",
+      "composer": "AurosonMusic",
+      "arranger": "PlatyJam contributors (chart transcription)",
+      "durationMs": 198382,
+      "bpm": 102,
+      "difficulties": {
+        "easy": {
+          "tiles": 150,
+          "notesPerSecond": 0.76
+        },
+        "normal": {
+          "tiles": 305,
+          "notesPerSecond": 1.54
+        },
+        "hard": {
+          "tiles": 410,
+          "notesPerSecond": 2.07
+        }
+      }
+    },
+    {
       "id": "billabong-morning",
       "title": "Billabong Morning",
       "composer": "PlatyJam song generator (seed 95)",

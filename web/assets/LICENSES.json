@@ -17,6 +17,25 @@
       "paths": ["songs-src/andre-sonatine/", "public/songs/andre-sonatine.json"]
     },
     {
+      "id": "beach-tropical-house",
+      "kind": "song",
+      "title": "Beach Tropical House",
+      "composer": "AurosonMusic",
+      "arranger": "PlatyJam contributors (chart transcription)",
+      "author": "AurosonMusic",
+      "source": "https://freemusicarchive.org/music/aurosonmusic/single/beach-tropical-house/",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "nonCommercial": false,
+      "modifications": "Lead melody transcribed by PlatyJam contributors into a MIDI chart (simplified); the recording re-encoded to AAC with the cover art removed.",
+      "retrieved": "2026-10-19",
+      "paths": [
+        "songs-src/beach-tropical-house/",
+        "public/songs/beach-tropical-house.json",
+        "public/songs/beach-tropical-house.m4a"
+      ]
+    },
+    {
       "id": "beethoven-fur-elise",
       "kind": "song",
       "title": "Für Elise, WoO 59",
