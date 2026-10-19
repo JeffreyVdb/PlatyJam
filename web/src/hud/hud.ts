@@ -101,10 +101,17 @@ export function createHud(root: HTMLElement): Hud {
       panel.append(status, actions, ...sections);
       root.append(panel);
 
+      // Frames per second over the last refresh, for checking performance on a device.
+      let lastFrames = hook.state().frames;
+      let lastTime = performance.now();
       const refresh = () => {
         const s = hook.state();
+        const now = performance.now();
+        const fps = ((s.frames - lastFrames) * 1000) / Math.max(1, now - lastTime);
+        lastFrames = s.frames;
+        lastTime = now;
         const mode = s.contextLost ? 'Context lost' : s.running ? 'Rendering' : 'Paused';
-        status.textContent = `${mode}, ${s.frames} frames, scene built ${s.sceneBuilds}×, renderer replaced ${s.recreations}×`;
+        status.textContent = `${mode}, ${fps.toFixed(0)} fps, ${s.frames} frames, scene built ${s.sceneBuilds}×, renderer replaced ${s.recreations}×`;
       };
       refresh();
       setInterval(refresh, 250);

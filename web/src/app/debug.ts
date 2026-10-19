@@ -1,5 +1,6 @@
 import type { WebGLRenderer } from 'three';
 import type { GameAudio } from '../audio/game-audio';
+import type { GameSession } from '../game/session-contract';
 import type { RendererHost, RendererHostState } from '../render/renderer-host';
 import type { Lifecycle } from './lifecycle';
 
@@ -18,6 +19,8 @@ export interface DebugHook {
   readonly lifecycle: Lifecycle;
   /** The audio engine, piano and accompaniment, when sound could start. */
   audio?: GameAudio;
+  /** The game session, when sound could start. */
+  session?: GameSession | undefined;
 }
 
 declare global {

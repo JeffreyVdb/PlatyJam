@@ -19,6 +19,8 @@
   --ripple: #6fe3cf;
   --foam: #f3f7ee;
   --foam-soft: #c9dbd6;
+  /* Misses and failures: a snag in the river. */
+  --snag: #ff6f61;
 
   --font: 'Shantell Sans', ui-rounded, 'SF Pro Rounded', system-ui, sans-serif;
   --edge: 16px;
@@ -717,6 +719,436 @@ body {
   color: var(--river-deep);
 }
 
+/* ---- Gameplay HUD (PLA-6) ---- */
+
+/* During a run the stage is the whole picture: the brand steps aside. */
+.hud.is-playing .brand {
+  visibility: hidden;
+}
+
+.hud.is-playing .notices {
+  margin-top: 64px;
+}
+
+.hud > .play-hud {
+  position: fixed;
+  inset: 0;
+  padding: calc(env(safe-area-inset-top) + var(--edge))
+    calc(env(safe-area-inset-right) + var(--edge)) calc(env(safe-area-inset-bottom) + var(--edge))
+    calc(env(safe-area-inset-left) + var(--edge));
+  pointer-events: none;
+}
+
+.play-meter {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(13rem, 40vw);
+}
+
+.play-score {
+  margin: 0;
+  font-size: clamp(1.75rem, 4.6vmin, 2.5rem);
+  font-weight: 760;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  line-height: 1;
+  text-shadow: 0 2px 10px rgb(3 14 22 / 55%);
+}
+
+.play-progress {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: rgb(201 219 214 / 18%);
+}
+
+.play-progress-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--bill);
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+
+.play-star {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--at) * 100%);
+  width: 18px;
+  height: 18px;
+  color: rgb(201 219 214 / 45%);
+  transform: translate(-50%, -50%);
+  transition:
+    color 200ms ease-out,
+    transform 320ms var(--ease-out);
+}
+
+.play-star.is-earned {
+  color: var(--bill);
+  transform: translate(-50%, -50%) scale(1.2);
+}
+
+.star-icon {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: currentcolor;
+  filter: drop-shadow(0 1px 3px rgb(3 14 22 / 50%));
+}
+
+.pause-button {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + var(--edge));
+  right: calc(env(safe-area-inset-right) + var(--edge));
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(22 69 96 / 82%);
+  color: var(--foam);
+  box-shadow: var(--shadow-card);
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: manipulation;
+  transition:
+    background-color 120ms ease-out,
+    transform 120ms ease-out;
+}
+
+.pause-button:hover {
+  background: var(--river-raised);
+}
+
+.pause-button:active {
+  transform: scale(0.94);
+}
+
+.pause-button:focus-visible {
+  outline: 3px solid var(--ripple);
+  outline-offset: 3px;
+}
+
+.pause-button[hidden] {
+  display: none;
+}
+
+.pause-icon {
+  width: 24px;
+  height: 24px;
+  fill: currentcolor;
+}
+
+/* Combo and judgment sit just above the hit line (--hit-line-y is set by main.ts). */
+.play-centre {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--hit-line-y, 74%) - 7.5rem);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  transform: translateX(-50%);
+  text-align: center;
+  text-shadow: 0 2px 12px rgb(3 14 22 / 70%);
+}
+
+.play-centre[hidden] {
+  display: none;
+}
+
+.play-combo {
+  min-height: 1.4em;
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--foam-soft);
+}
+
+.play-judgment {
+  min-height: 1.15em;
+  margin: 0;
+  font-size: clamp(2rem, 7vmin, 3.25rem);
+  font-weight: 780;
+  letter-spacing: -0.015em;
+  line-height: 1.1;
+  opacity: 0;
+}
+
+.play-judgment[data-judgment='perfect'] {
+  color: var(--bill);
+}
+
+.play-judgment[data-judgment='good'] {
+  color: var(--ripple);
+}
+
+.play-judgment[data-judgment='miss'] {
+  color: var(--snag);
+}
+
+/* ---- Interim screens: a stand-in until PLA-7's menus, pause and results ---- */
+
+.hud > .start-panel {
+  position: fixed;
+  left: 50%;
+  top: var(--hit-line-y, 74%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(30rem, calc(100% - 2 * var(--edge)));
+  padding: 28px 24px 0;
+  transform: translate(-50%, calc(-100% + 44px));
+  text-align: center;
+  /* A pool of darker water so the text reads over the lanes. */
+  background: radial-gradient(closest-side, rgb(13 43 62 / 88%) 55%, rgb(13 43 62 / 0%));
+  pointer-events: none;
+  animation: overlay-in 280ms var(--ease-out) both;
+}
+
+.start-title {
+  margin: 0;
+  font-size: clamp(2rem, 6vmin, 3.25rem);
+  font-weight: 760;
+  letter-spacing: -0.015em;
+  line-height: 1.05;
+  text-wrap: balance;
+}
+
+.start-composer {
+  margin: 6px 0 0;
+  font-size: 1.125rem;
+  color: var(--foam-soft);
+}
+
+.start-settings {
+  margin: 4px 0 26px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--ripple);
+}
+
+.start-note {
+  min-height: 1.4em;
+  margin: 16px 0 0;
+  font-size: 0.9375rem;
+  line-height: 1.4;
+  color: var(--foam-soft);
+  font-variant-numeric: tabular-nums;
+  text-wrap: balance;
+}
+
+/* The Start tile: a big tile resting on the hit line. */
+.start-tile {
+  width: min(15rem, 70vw);
+  min-height: 88px;
+  border: 0;
+  border-radius: var(--radius-card);
+  background: var(--bill);
+  color: var(--river-deep);
+  font: inherit;
+  font-size: 1.75rem;
+  font-weight: 760;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: manipulation;
+  box-shadow:
+    inset 0 -6px 0 var(--bill-pressed),
+    0 10px 28px rgb(3 14 22 / 50%);
+  transition:
+    transform 120ms ease-out,
+    box-shadow 120ms ease-out,
+    opacity 200ms ease-out;
+}
+
+.start-tile:hover {
+  background: #ffc12e;
+}
+
+.start-tile:active {
+  transform: translateY(3px);
+  box-shadow:
+    inset 0 -2px 0 var(--bill-pressed),
+    0 6px 16px rgb(3 14 22 / 45%);
+}
+
+.start-tile:focus-visible {
+  outline: 3px solid var(--ripple);
+  outline-offset: 4px;
+}
+
+.start-tile:disabled {
+  cursor: default;
+  opacity: 0.55;
+  background: var(--bill);
+  transform: none;
+}
+
+.game-sheet {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: calc(env(safe-area-inset-top) + var(--edge))
+    calc(env(safe-area-inset-right) + var(--edge)) calc(env(safe-area-inset-bottom) + var(--edge))
+    calc(env(safe-area-inset-left) + var(--edge));
+  background: rgb(13 43 62 / 80%);
+  animation: overlay-in 240ms var(--ease-out) both;
+}
+
+.game-card {
+  box-sizing: border-box;
+  width: min(26rem, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 26px 24px 24px;
+  border-radius: var(--radius-card);
+  background: var(--river);
+  box-shadow: var(--shadow-card);
+}
+
+.game-card-title {
+  margin: 0 0 8px;
+  font-size: 1.875rem;
+  font-weight: 760;
+  letter-spacing: -0.015em;
+  line-height: 1.1;
+  text-wrap: balance;
+}
+
+.game-card-text {
+  margin: 0 0 18px;
+  font-size: 1.0625rem;
+  line-height: 1.45;
+  color: var(--foam-soft);
+  text-wrap: pretty;
+}
+
+.game-card-alert {
+  margin: 0 0 18px;
+  padding: 12px 16px;
+  border-radius: var(--radius-control);
+  background: var(--river-raised);
+  outline: 2px solid var(--bill);
+  outline-offset: -2px;
+  line-height: 1.4;
+}
+
+.game-card-alert[hidden] {
+  display: none;
+}
+
+.game-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.game-card-actions .hud-button--primary {
+  flex: 1 1 100%;
+  min-height: 52px;
+  font-size: 1.125rem;
+}
+
+.game-card-actions .hud-button--quiet {
+  flex: 1 1 0;
+}
+
+.result-stars {
+  display: flex;
+  gap: 8px;
+  margin: 4px 0 10px;
+}
+
+.result-star {
+  width: 36px;
+  height: 36px;
+  color: rgb(201 219 214 / 30%);
+}
+
+.result-star.is-earned {
+  color: var(--bill);
+}
+
+.result-score {
+  margin: 0 0 14px;
+  font-size: 2.75rem;
+  font-weight: 780;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.result-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 16px;
+  margin: 0 0 18px;
+}
+
+.result-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgb(201 219 214 / 16%);
+}
+
+.result-label {
+  font-size: 0.9375rem;
+  color: var(--foam-soft);
+}
+
+.result-value {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The countdown floats over the lanes and lets every touch through to them. */
+.hud > .countdown {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 var(--edge);
+  text-align: center;
+  pointer-events: none;
+}
+
+.countdown-beat {
+  margin: 0;
+  font-size: clamp(5rem, 22vmin, 9rem);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: var(--foam);
+  text-shadow: 0 6px 30px rgb(3 14 22 / 70%);
+}
+
+.countdown-hint {
+  max-width: 30ch;
+  min-height: 1.4em;
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--bill);
+  text-shadow: 0 2px 12px rgb(3 14 22 / 80%);
+  text-wrap: balance;
+}
+
 .noscript {
   position: fixed;
   inset: 0;
@@ -733,8 +1165,14 @@ body {
   .notice.is-leaving,
   .resume-overlay,
   .calibration,
-  .calibration-ripple {
+  .calibration-ripple,
+  .start-panel,
+  .game-sheet {
     animation: none;
+  }
+
+  .play-star {
+    transition: none;
   }
 
   .resume-disc::before,

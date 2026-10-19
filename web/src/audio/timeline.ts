@@ -32,6 +32,16 @@ export interface Timeline {
    * judge hits with: the input offset is applied here and nowhere else.
    */
   judgeSongTime(eventTimeStamp: number): number;
+  /**
+   * Song ms at which a tap received right now would be judged: `judgeSongTime(now)`
+   * while the clock runs. Once `pause()` stopped it, that value from the instant
+   * before. Once something else stopped it, the held position less the input offset,
+   * as for a tap received the moment it stopped (`judgeSongTime` can only return the
+   * held position then, and the output mapping is lost).
+   */
+  judgeSongTimeNow(): number;
+  /** Pauses the clock, keeping what `judgeSongTimeNow()` read just before for this pause. */
+  pause(): void;
   /** Context seconds to start a sound so it is heard at song ms `songMs`. Needs a running clock. */
   startTimeFor(songMs: number): number;
 }
@@ -53,6 +63,11 @@ export function createTimeline({
 }: TimelineOptions): Timeline {
   let highWater = -Infinity;
   let generation = -1;
+  // `judgeSongTimeNow()` as `pause()` stopped the clock, valid while it stays stopped.
+  let held: { generation: number; judgeMs: number } | undefined;
+
+  const judgeSongTime = (eventTimeStamp: number) =>
+    clock.songTimeAt(contextTimeAt(eventTimeStamp - offsets().inputOffsetMs));
 
   return {
     clock,
@@ -65,8 +80,17 @@ export function createTimeline({
       highWater = Math.max(highWater, clock.songTimeAt(contextTimeAt(nowMs())));
       return highWater;
     },
-    judgeSongTime(eventTimeStamp) {
-      return clock.songTimeAt(contextTimeAt(eventTimeStamp - offsets().inputOffsetMs));
+    judgeSongTime,
+    judgeSongTimeNow() {
+      if (clock.isRunning) return judgeSongTime(nowMs());
+      if (held?.generation === clock.generation) return held.judgeMs;
+      return clock.position() - offsets().inputOffsetMs * clock.tempo;
+    },
+    pause() {
+      if (!clock.isRunning) return;
+      const judgeMs = judgeSongTime(nowMs());
+      clock.pause();
+      held = { generation: clock.generation, judgeMs };
     },
     startTimeFor(songMs) {
       return clock.ctxTimeFor(songMs) - offsets().audioOffsetMs / 1000;

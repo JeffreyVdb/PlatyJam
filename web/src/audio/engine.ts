@@ -40,7 +40,13 @@ export interface AudioEngineEvents {
   interrupted: { reason: InterruptReason };
   /** The resume tap did not bring audio back; ask for one more tap (it recreates the context). */
   needsgesture: { recreate: boolean };
-  /** Audio runs again and the song clock continues. Re-plan scheduled audio now. */
+  /**
+   * The resume tap brought audio back. The song clock is still paused unless
+   * `resumed` follows; with `resumeFromGesture({ resumeClock: false })` it waits for
+   * `resumeClock()` (the game runs its countdown in between).
+   */
+  recovered: { recreated: boolean };
+  /** The song clock continues. Re-plan scheduled audio now. */
   resumed: { recreated: boolean };
   /**
    * A new AudioContext replaced a stuck one. Every node is gone (decoded
@@ -92,9 +98,16 @@ export interface AudioEngine {
   installUnlock(doc?: Document): () => void;
   /**
    * Call synchronously from the "Tap to resume" gesture handler. Resumes the
-   * context there (or recreates it when it is known to be stuck), then the clock.
+   * context there (or recreates it when it is known to be stuck) and emits
+   * `recovered`; then resumes the clock and emits `resumed`, unless `resumeClock`
+   * is false, which leaves the song paused for `resumeClock()`.
    */
-  resumeFromGesture(): void;
+  resumeFromGesture(options?: { resumeClock?: boolean }): void;
+  /**
+   * Resumes a paused song clock and emits `resumed` (the accompaniment re-plans on
+   * it). Ignored while the audio is interrupted or the clock already runs.
+   */
+  resumeClock(): void;
   /** Stops everything playing on the engine, with a short fade (emits `silenced`). */
   silence(fadeMs?: number): void;
   /** Debug: interrupts as backgrounding would. `stuck` makes the next tap recreate. */
@@ -171,6 +184,8 @@ export function createAudioEngine({
   // Bumped to abandon an in-flight resume or recovery when the situation changed.
   let attempt = 0;
   let resuming = false;
+  // Whether the context was recreated since the clock last resumed, for `resumed`.
+  let recreatedSinceResume = false;
   let offsets: LatencyOffsets = { ...ZERO_OFFSETS };
   let removeUnlock = noop;
   let unlockedBy: string | undefined;
@@ -240,7 +255,8 @@ export function createAudioEngine({
       return;
     }
     interrupted = true;
-    clock.pause();
+    // Through the timeline, so the game can still settle up to what the player heard.
+    timeline.pause();
     events.emit('interrupted', { reason });
     suspendAfterFade(attempt);
   }
@@ -268,6 +284,14 @@ export function createAudioEngine({
       if (current() && !ok) needsRecreate = true;
     })();
   };
+
+  function resumeSongClock() {
+    if (interrupted || clock.isRunning) return;
+    clock.resume();
+    const recreated = recreatedSinceResume;
+    recreatedSinceResume = false;
+    events.emit('resumed', { recreated });
+  }
 
   const offs = [
     bus.on('pause', () => {
@@ -325,7 +349,7 @@ export function createAudioEngine({
       };
     },
 
-    resumeFromGesture() {
+    resumeFromGesture({ resumeClock = true } = {}) {
       if (!interrupted || resuming) return;
       const recreated = needsRecreate;
       // `new AudioContext()` and `resume()` both run synchronously in the gesture.
@@ -342,10 +366,13 @@ export function createAudioEngine({
           return;
         }
         interrupted = false;
-        clock.resume();
-        events.emit('resumed', { recreated });
+        recreatedSinceResume ||= recreated;
+        events.emit('recovered', { recreated });
+        if (resumeClock) resumeSongClock();
       });
     },
+
+    resumeClock: resumeSongClock,
 
     silence(fadeMs = SILENCE_FADE_MS) {
       events.emit('silenced', { fadeMs });
