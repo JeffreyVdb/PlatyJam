@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { Tile } from '../chart/schema';
 import type { FailMode, JudgmentEvent } from './session-contract';
-import { createSimulation, finalizationHorizon, type Simulation, TAIL } from './simulation';
+import { MAX_EVENT_LAG_MS } from './input';
+import {
+  createSimulation,
+  FINALIZE_GRACE_MS,
+  finalizationHorizon,
+  type Simulation,
+  TAIL,
+} from './simulation';
 
 const tap = (t: number, lane: number): Tile => ({ t, lane, pitches: [60], vel: 90 });
 const hold = (t: number, lane: number, dur: number): Tile => ({
@@ -348,8 +355,9 @@ describe('simulation', () => {
     ];
 
     /**
-     * Frames tick at `fps`. Each input is dispatched `lagMs` after it happened (in
-     * timestamp order), and each frame finalizes up to the horizon. Returns the log.
+     * Frames tick at `fps`; `now` is the song time an input made now would get. Each
+     * input is dispatched `lagMs` real ms after it happened (in timestamp order), and
+     * each frame finalizes up to the horizon. Returns the log.
      */
     const simulate = (fps: number, failMode: FailMode, tempo = 1, lagMs = 20) => {
       const run = setup(tiles, { failMode, tempo, durationMs: 3000 });
@@ -357,7 +365,7 @@ describe('simulation', () => {
       const queue = [...inputs].sort((a, b) => a.at - b.at);
       for (let now = 0; now < 4000; now += frame) {
         // Inputs that arrived since the last frame, in arrival order.
-        while (queue[0] && queue[0].at + lagMs <= now) {
+        while (queue[0] && queue[0].at + lagMs * tempo <= now) {
           const next = queue.shift();
           if (next?.kind === 'press') run.sim.press(next.input, next.lane, next.at);
           else if (next) run.sim.release(next.input, next.at);
@@ -376,6 +384,39 @@ describe('simulation', () => {
         expect(simulate(60, mode, 1, 0)).toEqual(at60);
       },
     );
+
+    // Every lag the input layer accepts, at every tempo.
+    it.each(
+      (['classic', 'relaxed'] as const).flatMap((mode) =>
+        [0.75, 1, 1.5].flatMap((tempo) =>
+          [0, 120, MAX_EVENT_LAG_MS].map((lagMs) => [mode, tempo, lagMs] as const),
+        ),
+      ),
+    )('gives identical %s outcomes at %sx with %s ms of dispatch lag', (mode, tempo, lagMs) => {
+      const reference = simulate(60, mode, tempo, 0);
+      for (const fps of [30, 60, 120]) expect(simulate(fps, mode, tempo, lagMs)).toEqual(reference);
+    });
+
+    it('judges a press that arrives late but within the accepted lag before its miss', () => {
+      // Pressed at 1120 (Good at 1×), dispatched 60 ms later.
+      for (const fps of [30, 60, 120]) {
+        const run = setup([tap(1000, 0)], { durationMs: 2000 });
+        let dispatched = false;
+        for (let now = 0; now < 1500; now += 1000 / fps) {
+          if (!dispatched && now >= 1180) {
+            run.sim.press('p1', 0, 1120);
+            dispatched = true;
+          }
+          run.sim.advance(finalizationHorizon(now, 1));
+        }
+        expect(run.summary()).toEqual(['tap:good@0#0']);
+        expect(run.sim.status).toBe('running');
+      }
+    });
+
+    it('waits for the whole input lag the input layer accepts before finalizing', () => {
+      expect(FINALIZE_GRACE_MS).toBe(MAX_EVENT_LAG_MS);
+    });
 
     it('plays the passage as expected in Relaxed', () => {
       const { log, status } = simulate(60, 'relaxed');

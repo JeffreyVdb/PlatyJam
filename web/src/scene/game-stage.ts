@@ -30,6 +30,7 @@ import {
 import { LANES, type Tile, tileEnd } from '../chart/schema';
 import type { JudgmentEvent } from '../game/session-contract';
 import type { StageView } from '../game/session';
+import { headDeadline } from '../game/judgment';
 import { HEAD, TAIL } from '../game/simulation';
 import { fitCamera, type CameraFit } from './camera-fit';
 import { firstVisibleTile, laneForPoint, longestHold, tileDepth } from './lane-layout';
@@ -535,6 +536,8 @@ export function createGameStage({ surface }: GameStageOptions): GameStage {
       if (!tile || tile.t > songMs + aheadMs) break;
       const head = simulation?.heads[i] ?? HEAD.pending;
       const tail = simulation?.tails[i] ?? TAIL.none;
+      // Past its late boundary: the Miss is only waiting for in-flight input.
+      const lapsed = head === HEAD.pending && songMs > headDeadline(tile.t, config.tempo);
       const z = tileDepth(tile.t, songMs, windowMs, HIGHWAY_FAR);
 
       if (tile.dur !== undefined && bodyCount + 2 <= MAX_HOLD_SEGMENTS) {
@@ -544,7 +547,7 @@ export function createGameStage({ surface }: GameStageOptions): GameStage {
         const holding = tail === TAIL.holding || tail === TAIL.suspended;
         const done = tail === TAIL.perfect;
         if (!done && endZ < HIGHWAY_NEAR) {
-          if (tail === TAIL.missed || head === HEAD.missed) {
+          if (tail === TAIL.missed || head === HEAD.missed || lapsed) {
             // From where it was let go (or the whole hold) up to its tail.
             const stopped = simulation?.holdEndMs[i] ?? Number.NaN;
             const fromZ = Number.isNaN(stopped)
@@ -572,7 +575,7 @@ export function createGameStage({ surface }: GameStageOptions): GameStage {
       const hitHead = head === HEAD.perfect || head === HEAD.good;
       if (hitHead || z > HIGHWAY_NEAR + TILE_DEPTH || z < -HIGHWAY_FAR * 1.02) continue;
       if (tileCount >= MAX_TILES) continue;
-      if (head === HEAD.missed) {
+      if (head === HEAD.missed || lapsed) {
         colour.copy(i === offender ? SNAG : MISSED_TILE);
         if (i === offender) colour.lerp(FOAM, 0.25 * blink);
       } else {

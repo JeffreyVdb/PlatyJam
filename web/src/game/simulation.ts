@@ -1,4 +1,5 @@
 import { LANES, type Tile, tileEnd } from '../chart/schema';
+import { MAX_EVENT_LAG_MS } from './input';
 import { headDeadline, judgeHead, tailReleaseIsSuccessful } from './judgment';
 import { createScore, type Score, scoreUnit } from './scoring';
 import type { Failure, FailMode, Judgment, JudgmentEvent } from './session-contract';
@@ -34,10 +35,12 @@ export type SimulationStatus = 'running' | 'failed' | 'complete';
 
 /**
  * How long, in real ms, the simulation waits beyond "now" before it finalizes a
- * Miss or a hold completion, so an input already in flight (dispatched after the
- * frame that would otherwise finalize it) is judged first. Tunable.
+ * Miss or a hold completion, so an input still in flight (dispatched after the
+ * frame that would otherwise finalize it) is judged first. It equals the oldest
+ * event timestamp the input layer accepts: any input it judges by its own
+ * timestamp arrives before that timestamp is finalized, at every frame rate.
  */
-export const FINALIZE_GRACE_MS = 50;
+export const FINALIZE_GRACE_MS = MAX_EVENT_LAG_MS;
 
 /**
  * The time up to which a frame may finalize: the song time at which an input

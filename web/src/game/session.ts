@@ -115,8 +115,9 @@ export function createGameplaySession({
   let timer: ReturnType<typeof setTimeout> | undefined;
   /** Voices of the hold being held, per tile index. */
   const holdVoices = new Map<number, PianoVoice[]>();
-  /** When the run failed (performance ms), for the rewind. */
+  /** When the run failed (performance ms) and where the clock stopped, for the rewind. */
   let failedAt = 0;
+  let failedSongMs = 0;
 
   const live: LiveStats = {
     score: 0,
@@ -219,6 +220,7 @@ export function createGameplaySession({
       input?.clear();
       countdown = undefined;
       failedAt = now();
+      failedSongMs = engine.clock.position();
       const final = buildResults(sim, config);
       setState('failing');
       timer = setTimeout(() => {
@@ -578,8 +580,10 @@ export function createGameplaySession({
       case 'finished': {
         const end = sim?.endMs ?? engine.clock.position();
         if (sim?.status !== 'failed') return end;
-        const rewound = REWIND_SONG_MS * config.tempo;
-        return end - rewound * easeOut((now() - failedAt) / REWIND_DURATION_MS);
+        // From where the clock stopped back to a little before the failure.
+        const target = end - REWIND_SONG_MS * config.tempo;
+        const eased = easeOut((now() - failedAt) / REWIND_DURATION_MS);
+        return failedSongMs + (target - failedSongMs) * eased;
       }
       default:
         return -config.chart.leadInMs;

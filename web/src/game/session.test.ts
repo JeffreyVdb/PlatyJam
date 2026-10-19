@@ -5,8 +5,15 @@ import type { AudioEngineEvents, EnginePhase } from '../audio/engine';
 import { createSongClock } from '../audio/clock';
 import { createTimeline } from '../audio/timeline';
 import type { Chart, Tile } from '../chart/schema';
-import { COUNTDOWN_BEAT_MS, createGameplaySession, type SessionAudio } from './session';
+import {
+  COUNTDOWN_BEAT_MS,
+  createGameplaySession,
+  REWIND_DURATION_MS,
+  REWIND_SONG_MS,
+  type SessionAudio,
+} from './session';
 import type { SessionSetup, SessionState } from './session-contract';
+import { FINALIZE_GRACE_MS } from './simulation';
 
 const tap = (t: number, lane: number, pitches = [60]): Tile => ({ t, lane, pitches, vel: 100 });
 const hold = (t: number, lane: number, dur: number): Tile => ({
@@ -290,6 +297,20 @@ describe('game session', () => {
       });
     });
 
+    it('rewinds the stage from where the clock stopped to just before the failure', async () => {
+      await loaded([tap(1000, 0), tap(3000, 1)]);
+      session.start();
+      while (session.state !== 'failing') frames(16);
+      const stoppedAt = songMs();
+      // The Miss is finalized a grace after its late boundary.
+      expect(stoppedAt).toBeGreaterThan(1120 + FINALIZE_GRACE_MS);
+      expect(session.view().songMs).toBeCloseTo(stoppedAt);
+      fake.advance(REWIND_DURATION_MS);
+      // The failure is the expiry of the tile at 1000, at its late boundary.
+      expect(session.view().songMs).toBeCloseTo(1120 - REWIND_SONG_MS);
+      expect(songMs()).toBe(stoppedAt);
+    });
+
     it('keeps stars earned before a failure and names an empty tap', async () => {
       await loaded([tap(1000, 0), tap(3000, 1)]);
       session.start();
@@ -324,7 +345,8 @@ describe('game session', () => {
       press('a', 0);
       frames(2900);
       expect(session.state).toBe('playing');
-      frames(300);
+      // Completion waits for the finalization grace past durationMs.
+      frames(150 + FINALIZE_GRACE_MS);
       expect(session.state).toBe('finished');
       expect(session.results).toMatchObject({
         outcome: 'cleared',
@@ -415,7 +437,7 @@ describe('game session', () => {
       expect(session.countdown?.reclaimedLanes).toEqual([3]);
       await vi.advanceTimersByTimeAsync(COUNTDOWN_BEAT_MS * 3);
       expect(session.stats()).toMatchObject({ perfect: 2, miss: 1, combo: 0 });
-      frames(1600);
+      frames(1600 + FINALIZE_GRACE_MS);
       expect(session.stats()).toMatchObject({ perfect: 3, miss: 1 });
     });
 
