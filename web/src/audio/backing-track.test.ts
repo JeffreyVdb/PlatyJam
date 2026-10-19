@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { backingTrackUrl, loadBackingTrack, planBackingStart } from './backing-track';
+import {
+  backingTrackStartMs,
+  backingTrackUrl,
+  createBackingTrack,
+  loadBackingTrack,
+  planBackingStart,
+} from './backing-track';
 import { createSongClock } from './clock';
 
 function clockAt({ tempo = 1, ctx = 0, songMs = 0 } = {}) {
@@ -57,6 +63,164 @@ describe('planBackingStart', () => {
   it('returns null once the track is over', () => {
     const clock = clockAt({ songMs: 61_000 });
     expect(planBackingStart({ ...base, clock, now: 0 })).toBeNull();
+  });
+
+  describe('with the chart’s audio.offsetMs (the recording’s position at t = 0)', () => {
+    it('starts the file before t = 0 when it is ahead of the chart by offsetMs', () => {
+      // 500 ms into the file at t = 0: its first sample plays 500 ms before t = 0.
+      const trackStartMs = backingTrackStartMs({ offsetMs: 500 });
+      expect(trackStartMs).toBe(-500);
+      const clock = clockAt({ songMs: -2000 });
+      expect(planBackingStart({ ...base, trackStartMs, clock, now: 0 })).toEqual({
+        when: 1.5,
+        offset: 0,
+      });
+    });
+
+    it('starts the file after t = 0 when offsetMs is negative', () => {
+      const trackStartMs = backingTrackStartMs({ offsetMs: -250 });
+      const clock = clockAt({ songMs: -2000 });
+      expect(planBackingStart({ ...base, trackStartMs, clock, now: 0 })).toEqual({
+        when: 2.25,
+        offset: 0,
+      });
+    });
+
+    it('joins mid-file when offsetMs reaches back before the lead-in', () => {
+      // The file began 3 s before t = 0 but the clock only starts at −2 s.
+      const trackStartMs = backingTrackStartMs({ offsetMs: 3000 });
+      const clock = clockAt({ songMs: -2000 });
+      const plan = planBackingStart({ ...base, trackStartMs, clock, now: 0 });
+      expect(plan?.when).toBeCloseTo(0.05, 9);
+      // Song time at 0.05 s is −1.95 s, which is 1.05 s into the file.
+      expect(plan?.offset).toBeCloseTo(1.05, 9);
+    });
+
+    it('puts the recording at offsetMs at chart t = 0', () => {
+      const trackStartMs = backingTrackStartMs({ offsetMs: 1200 });
+      const clock = clockAt({ songMs: 0 });
+      const plan = planBackingStart({ ...base, trackStartMs, clock, now: 0 });
+      // Starting (almost) at t = 0 means being 1.2 s into the file, plus the 50 ms lead.
+      expect(plan?.offset).toBeCloseTo(1.25, 9);
+    });
+  });
+});
+
+describe('createBackingTrack', () => {
+  class FakeParam {
+    value = 1;
+    readonly calls: [string, ...number[]][] = [];
+    cancelScheduledValues(t: number) {
+      this.calls.push(['cancel', t]);
+    }
+    setValueAtTime(v: number, t: number) {
+      this.calls.push(['set', v, t]);
+    }
+    linearRampToValueAtTime(v: number, t: number) {
+      this.calls.push(['ramp', v, t]);
+    }
+  }
+  class FakeSource {
+    buffer: AudioBuffer | null = null;
+    playbackRate = { value: 1 };
+    onended: (() => void) | null = null;
+    started: [number, number] | undefined;
+    stoppedAt: number | undefined;
+    connect<T>(node: T) {
+      return node;
+    }
+    disconnect() {
+      /* nothing to release */
+    }
+    start(when: number, offset: number) {
+      this.started = [when, offset];
+    }
+    stop(t: number) {
+      this.stoppedAt = t;
+    }
+  }
+
+  function setup({ tempo = 1, songMs = -2000, trackStartMs = 0 } = {}) {
+    const sources: FakeSource[] = [];
+    const gains: FakeParam[] = [];
+    const target = {
+      context: {
+        currentTime: 0,
+        createBufferSource() {
+          const source = new FakeSource();
+          sources.push(source);
+          return source;
+        },
+        createGain() {
+          const param = new FakeParam();
+          gains.push(param);
+          return { gain: param, connect: <T>(node: T) => node, disconnect: () => undefined };
+        },
+      },
+      output: {},
+    } as unknown as { context: BaseAudioContext; output: AudioNode };
+    const clock = clockAt({ tempo, songMs });
+    const track = createBackingTrack({
+      target,
+      clock,
+      audioOffsetMs: () => 0,
+      buffer: { duration: 60 } as AudioBuffer,
+      trackStartMs,
+    });
+    return {
+      track,
+      sources,
+      gains,
+      clock,
+      context: target.context as unknown as { currentTime: number },
+    };
+  }
+
+  it('starts the file at the plan, at the clock tempo', () => {
+    const { track, sources } = setup({ tempo: 1.25 });
+    track.play();
+    expect(track.playing).toBe(true);
+    expect(sources[0]?.started).toEqual([1.6, 0]);
+    expect(sources[0]?.playbackRate.value).toBe(1.25);
+  });
+
+  it('plays nothing while the clock is stopped', () => {
+    const { track, sources, clock } = setup();
+    clock.pause();
+    track.play();
+    expect(track.playing).toBe(false);
+    expect(sources).toHaveLength(0);
+  });
+
+  it('fades the old node out when played again', () => {
+    const { track, sources, gains } = setup();
+    track.play();
+    track.play();
+    expect(sources).toHaveLength(2);
+    expect(sources[0]?.stoppedAt).toBeCloseTo(0.01, 9);
+    expect(gains[0]?.calls).toContainEqual(['ramp', 0, expect.closeTo(0.01, 9)]);
+  });
+
+  it('fades and stops on stop(), and is no longer playing', () => {
+    const { track, sources } = setup();
+    track.play();
+    track.stop(150);
+    expect(track.playing).toBe(false);
+    expect(sources[0]?.stoppedAt).toBeCloseTo(0.15, 9);
+  });
+
+  it('drops the node on reset() without touching it: its context is gone', () => {
+    const { track, sources, gains } = setup();
+    track.play();
+    const callsBefore = gains[0]?.calls.length;
+    track.reset();
+    expect(track.playing).toBe(false);
+    expect(sources[0]?.stoppedAt).toBeUndefined();
+    expect(gains[0]?.calls).toHaveLength(callsBefore ?? -1);
+    // And it can start again on the new context.
+    track.play();
+    expect(sources).toHaveLength(2);
+    expect(track.playing).toBe(true);
   });
 });
 

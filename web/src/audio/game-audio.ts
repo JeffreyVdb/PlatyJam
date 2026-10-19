@@ -1,4 +1,6 @@
 import type { Lifecycle } from '../app/lifecycle';
+import { createBackingPlayer, type BackingPlayer } from './backing-player';
+import { createBackingTrack, loadBackingTrack } from './backing-track';
 import { loadOffsets } from './calibration-store';
 import { createAudioEngine, type AudioEngine } from './engine';
 import { type LoadProgress, loadPianoSamples, type PianoSamples } from './piano-samples';
@@ -16,6 +18,17 @@ export interface GameAudio {
    * same samples with its own volume.
    */
   readonly accompaniment: Accompaniment;
+  /**
+   * The song's recording (`chart.audio`), through the accompaniment's submix so its
+   * volume applies. Loaded with the song; started, paused and stopped with the run.
+   */
+  readonly backing: BackingPlayer;
+  /**
+   * Tunes both pianos to a recording played at `rate` (its tempo): they play at
+   * `playbackRate = rate`, so the notes move with the recording's pitch. 1 is
+   * concert pitch. Applies to notes started from now on.
+   */
+  setTuning(rate: number): void;
   /** 0 to 1: the accompaniment's volume. The master volume is `engine.setMasterVolume`. */
   readonly accompanimentVolume: number;
   setAccompanimentVolume(volume: number): void;
@@ -53,20 +66,41 @@ export function createGameAudio({ bus, base }: GameAudioOptions): GameAudio {
     instrument: accompanimentPiano,
   });
 
+  const backing = createBackingPlayer({
+    loadBuffer: (src) =>
+      loadBackingTrack({
+        url: src,
+        base,
+        decode: (data) => engine.context.decodeAudioData(data),
+      }),
+    createTrack: (buffer, trackStartMs) =>
+      createBackingTrack({
+        target: accompanimentMix,
+        clock: engine.clock,
+        audioOffsetMs: () => engine.offsets.audioOffsetMs,
+        buffer,
+        trackStartMs,
+      }),
+  });
+
   // Both pianos fade on every stop: the player's notes and tap-pad voices too.
   engine.events.on('interrupted', () => {
     accompaniment.pause(PAUSE_FADE_MS);
+    backing.pause(PAUSE_FADE_MS);
     piano.stopAll(PAUSE_FADE_MS);
   });
   engine.events.on('recreated', () => {
     piano.reset();
     accompanimentPiano.reset();
+    backing.reset();
   });
   engine.events.on('resumed', () => {
     accompaniment.resume();
+    backing.resume();
   });
   engine.events.on('silenced', ({ fadeMs }) => {
     accompaniment.stopAll(fadeMs);
+    backing.stopAll(fadeMs);
     piano.stopAll(fadeMs);
   });
 
@@ -84,6 +118,11 @@ export function createGameAudio({ bus, base }: GameAudioOptions): GameAudio {
     engine,
     piano,
     accompaniment,
+    backing,
+    setTuning(rate) {
+      piano.setPlaybackRate(rate);
+      accompanimentPiano.setPlaybackRate(rate);
+    },
     get accompanimentVolume() {
       return accompanimentMix.volume;
     },

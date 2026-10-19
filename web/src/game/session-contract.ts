@@ -58,7 +58,7 @@ export interface SessionConfig extends Omit<SessionSetup, 'chart'> {
  * `restart()` goes from any run state (or `finished`) straight back to `starting`.
  */
 export type SessionState =
-  /** Waiting for the chart and the piano samples. Show `loading` progress. */
+  /** Waiting for the chart, the piano samples and the song's recording. Show `loading` progress. */
   | 'loading'
   /** Everything is loaded: show the Start tile. */
   | 'ready'
@@ -140,6 +140,12 @@ export interface LoadingInfo {
   chartLoaded: boolean;
   /** Piano samples: loaded and failed so far, of `total`. */
   samples: { loaded: number; failed: number; total: number };
+  /**
+   * The song's recording: `none` for a chart without one (and until the chart has
+   * arrived), `loading`, then `loaded` or `failed`. A failure does not stop the
+   * song, which plays without it.
+   */
+  backing: 'none' | 'loading' | 'loaded' | 'failed';
 }
 
 export type Judgment = 'perfect' | 'good' | 'miss';

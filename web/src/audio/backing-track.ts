@@ -43,6 +43,15 @@ export function planBackingStart({
   return offset < durationSec ? { when: earliest, offset } : null;
 }
 
+/**
+ * Chart ms at which the file's first sample plays, from a chart's `audio.offsetMs`
+ * (the recording's position at chart t = 0): a file 500 ms in at t = 0 started 500 ms
+ * before it. Not to be confused with `audioOffsetMs`, the calibrated output latency.
+ */
+export function backingTrackStartMs({ offsetMs }: { offsetMs: number }): number {
+  return -offsetMs;
+}
+
 /** `url` as given when it is absolute (`/…`, `https:`, `blob:`), otherwise under the app `base`. */
 export function backingTrackUrl(base: string, url: string): string {
   return url.startsWith('/') || /^[a-z][a-z\d+.-]*:/i.test(url) ? url : `${base}${url}`;
@@ -84,6 +93,8 @@ export interface BackingTrack {
   /** Starts (or restarts) the file in sync with the running clock. */
   play(): void;
   stop(fadeMs: number): void;
+  /** Drops the node without touching it: its context was closed and replaced. */
+  reset(): void;
   readonly playing: boolean;
 }
 
@@ -96,10 +107,10 @@ export interface BackingTrackOptions {
 }
 
 /**
- * An optional audio file under the song (for audio-file songs later). It plays at
+ * A song's recording (`chart.audio`), under the song. It plays at
  * `playbackRate = tempo`, so its pitch shifts with the tempo; a time-stretch would
- * keep the pitch but is not worth the cost yet. Changing the tempo mid-song needs
- * `play()` again.
+ * keep the pitch but is not worth the cost yet (the pianos follow it instead, see
+ * `GameAudio.setTuning`). Changing the tempo mid-song needs `play()` again.
  */
 export function createBackingTrack({
   target,
@@ -153,6 +164,9 @@ export function createBackingTrack({
       current = { source, gain };
     },
     stop,
+    reset() {
+      current = undefined;
+    },
     get playing() {
       return current !== undefined;
     },
