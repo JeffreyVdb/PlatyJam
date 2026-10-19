@@ -56,6 +56,9 @@ export const LICENSES = {
 } as const satisfies Record<string, LicenseInfo>;
 export type LicenseName = keyof typeof LICENSES;
 
+/** Licences that need no credit, the only ones a `debug` song (not in the credits) may have. */
+const DEBUG_LICENSES: readonly string[] = ['CC0 1.0', 'Public Domain'];
+
 export function isLicenseName(name: string): name is LicenseName {
   return Object.hasOwn(LICENSES, name);
 }
@@ -108,6 +111,15 @@ export const EntrySchema = z
         message: `licence "${entry.license}" is not on the allowlist (${Object.keys(LICENSES).join(', ')}); share-alike, no-derivatives and unknown licences are not allowed`,
       });
       return;
+    }
+    // The credits screen leaves a test song out, so only a licence that asks for no
+    // attribution can ship that way.
+    if (entry.kind === 'song' && entry.debug && !DEBUG_LICENSES.includes(entry.license)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['debug'],
+        message: `a debug song is not credited, so its licence must be one of ${DEBUG_LICENSES.join(', ')}, not ${entry.license}`,
+      });
     }
     const info: LicenseInfo = LICENSES[entry.license];
     if (entry.nonCommercial !== info.nonCommercial) {

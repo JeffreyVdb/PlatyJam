@@ -168,7 +168,7 @@ The manifest is checked by `scripts/licenses/manifest.ts` and its tests:
 - **Recordings:** every recording a chart names (`audio.src`, so `public/<src>`) must be covered by the `paths` of that song's entry, as a file or inside a listed directory; otherwise `pnpm test` fails (`recordingProblems()` in `manifest.ts`, run over every chart in `public/songs/` by `repo.test.ts`). A recording cannot ship without a credit.
 - **Consistency:** every `songs-src/<id>/` has exactly one song entry and every song entry a directory; each song's title, composer, arranger and `license` in `song.json` and in its built chart match the manifest; every listed path exists.
 
-A song entry with `"debug": true` (matching `debug` in its `song.json`) is a test song: it is shipped and licensed like any other, but the credits screen does not list it.
+A song entry with `"debug": true` (matching `debug` in its `song.json`) is a test song: it is shipped and licensed like any other, but the credits screen does not list it, so only a licence that needs no credit (`CC0 1.0` or `Public Domain`) passes the check.
 
 What ships:
 

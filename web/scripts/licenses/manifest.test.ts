@@ -93,6 +93,21 @@ describe('parseManifest', () => {
     expect(() => parseManifest(manifest({ ...sample, paths: ['/etc/passwd'] }))).toThrow(/paths/);
   });
 
+  it('lets a test song, which the credits leave out, have a licence that needs no credit only', () => {
+    const cc0 = {
+      ...song,
+      debug: true,
+      license: 'CC0 1.0',
+      licenseUrl: LICENSES['CC0 1.0'].url,
+    };
+    expect(parseManifest(manifest(cc0)).entries).toHaveLength(1);
+    expect(parseManifest(manifest({ ...cc0, license: 'Public Domain' })).entries).toHaveLength(1);
+    const by = { ...cc0, license: 'CC BY 4.0', licenseUrl: LICENSES['CC BY 4.0'].url };
+    expect(() => parseManifest(manifest(by))).toThrow(/debug song is not credited/);
+    // The same licence is fine for a song that is credited.
+    expect(parseManifest(manifest({ ...by, debug: false })).entries).toHaveLength(1);
+  });
+
   it('requires a composer and an arranger for songs, and a retrieval date', () => {
     expect(() => parseManifest(manifest({ ...song, composer: undefined }))).toThrow(/composer/);
     expect(() => parseManifest(manifest({ ...song, retrieved: '18/10/2026' }))).toThrow(
