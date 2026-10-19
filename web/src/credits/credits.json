@@ -50,6 +50,17 @@
           "changes": "Original work, made with the PlatyJam song generator; charted with the PlatyJam converter."
         },
         {
+          "id": "paradise-found",
+          "title": "Paradise Found",
+          "byline": "Kevin MacLeod (incompetech.com)",
+          "license": {
+            "label": "CC BY 4.0",
+            "url": "https://creativecommons.org/licenses/by/4.0/"
+          },
+          "source": "https://incompetech.com/music/royalty-free/index.html?isrc=USUAN2300000",
+          "changes": "Lead melody transcribed by PlatyJam contributors into a MIDI chart (simplified); the recording re-encoded to AAC."
+        },
+        {
           "id": "satie-gymnopedie-1",
           "title": "Gymnopédie No. 1",
           "byline": "E. Satie (1866–1925) · Evin Robertson, typeset for the Mutopia Project",

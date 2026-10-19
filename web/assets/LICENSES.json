@@ -85,6 +85,25 @@
       ]
     },
     {
+      "id": "paradise-found",
+      "kind": "song",
+      "title": "Paradise Found",
+      "composer": "Kevin MacLeod",
+      "arranger": "PlatyJam contributors (chart transcription)",
+      "author": "Kevin MacLeod (incompetech.com)",
+      "source": "https://incompetech.com/music/royalty-free/index.html?isrc=USUAN2300000",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "nonCommercial": false,
+      "modifications": "Lead melody transcribed by PlatyJam contributors into a MIDI chart (simplified); the recording re-encoded to AAC.",
+      "retrieved": "2026-10-19",
+      "paths": [
+        "songs-src/paradise-found/",
+        "public/songs/paradise-found.json",
+        "public/songs/paradise-found.m4a"
+      ]
+    },
+    {
       "id": "satie-gymnopedie-1",
       "kind": "song",
       "title": "Gymnopédie No. 1",

@@ -68,6 +68,28 @@
       }
     },
     {
+      "id": "paradise-found",
+      "title": "Paradise Found",
+      "composer": "Kevin MacLeod",
+      "arranger": "PlatyJam contributors (chart transcription)",
+      "durationMs": 183428,
+      "bpm": 105,
+      "difficulties": {
+        "easy": {
+          "tiles": 161,
+          "notesPerSecond": 0.88
+        },
+        "normal": {
+          "tiles": 382,
+          "notesPerSecond": 2.08
+        },
+        "hard": {
+          "tiles": 537,
+          "notesPerSecond": 2.93
+        }
+      }
+    },
+    {
       "id": "andre-sonatine",
       "title": "Sonatine, Op. 34: I. Moderato ma con moto",
       "composer": "J. André (1741–1799)",
