@@ -10,17 +10,13 @@ import {
   MeshBasicMaterial,
   Object3D,
   PerspectiveCamera,
-  Plane,
   PlaneGeometry,
-  Raycaster,
   RGBAFormat,
   RingGeometry,
   Scene,
   ShaderMaterial,
   Shape,
   ShapeGeometry,
-  SRGBColorSpace,
-  Vector2,
   Vector3,
   type BufferGeometry,
   type Material,
@@ -33,18 +29,33 @@ import type { StageView } from '../game/session';
 import { headDeadline } from '../game/judgment';
 import { prefersReducedMotion } from '../hud/motion';
 import { HEAD, TAIL } from '../game/simulation';
-import { fitCamera, type CameraFit } from './camera-fit';
-import { firstVisibleTile, laneForPoint, longestHold, tileDepth } from './lane-layout';
+import { createHighwayMaterial, EDGE_MARGIN } from './highway-material';
+import {
+  frameLayout,
+  HANDHELD,
+  HIGHWAY_WIDTH,
+  type HighwayLayout,
+  type Insets,
+  LANE_WIDTH,
+  laneAtNdc,
+  type LayoutKind,
+  NO_INSETS,
+  selectLayout,
+} from './highway-layout';
+import { firstVisibleTile, longestHold, tileDepth } from './lane-layout';
 
 /**
  * The gameplay stage: four lanes on the billabong, tiles scrolling to the hit line
  * as a pure function of song time, and the feedback for every hit.
  *
  * Draw calls stay at eleven: water, highway, lane glow, two hit-line layers, hold
- * bodies, double bridges, tiles, flashes, ripples and droplets. Everything that
+ * bodies, double bridges, tiles, flashes, ripples and droplets. The highway is one
+ * analytic-antialiasing shader (`highway-material.ts`), not a texture. Everything that
  * repeats is an InstancedMesh with a fixed capacity drawn up to `count`; nothing is
  * allocated per frame. `rebuild()` disposes and recreates every GPU resource, which
- * a lost WebGL context requires.
+ * a lost WebGL context requires, and `resize()` does the same when the viewport's
+ * shape calls for the other layout (`highway-layout.ts`): geometry, camera, fog and
+ * touch area are all read from the active layout when they are used.
  */
 
 // Brand palette, kept in sync with src/style.css.
@@ -63,16 +74,6 @@ const HOLD_PLAYED = BILL.clone().lerp(FOAM, 0.25);
 const MISSED_TILE = SNAG.clone().lerp(RIVER, 0.45);
 const MISSED_BODY = SNAG.clone().lerp(RIVER, 0.7);
 
-const LANE_WIDTH = 1;
-const HIGHWAY_WIDTH = LANES * LANE_WIDTH;
-/** Lane length behind the hit line (negative z) and in front of it. */
-const HIGHWAY_FAR = 14;
-const HIGHWAY_NEAR = 1.6;
-/** Touches this far beyond the highway's ends and sides still count as on it. */
-const TOUCH_SLACK = { side: 0.15, near: 1.2 };
-const TILE_DEPTH = 0.42;
-const TILE_WIDTH = LANE_WIDTH * 0.78;
-
 const MAX_TILES = 160;
 const MAX_HOLD_SEGMENTS = 32;
 const MAX_BRIDGES = 24;
@@ -90,7 +91,8 @@ const WARM_MS = 250;
 
 const laneX = (lane: number) => (lane - (LANES - 1) / 2) * LANE_WIDTH;
 
-function roundedTileShape(width: number, depth: number, radius: number): Shape {
+function roundedTileShape(width: number, depth: number): Shape {
+  const radius = Math.min(0.16, depth * 0.4);
   const x = -width / 2;
   const y = -depth / 2;
   const shape = new Shape();
@@ -104,28 +106,6 @@ function roundedTileShape(width: number, depth: number, radius: number): Shape {
   shape.lineTo(x, y + radius);
   shape.quadraticCurveTo(x, y, x + radius, y);
   return shape;
-}
-
-/** Lane surface: lane colour with darker dividers, baked so the highway is one draw. */
-function createLaneTexture(): DataTexture {
-  const width = LANES * 32;
-  const data = new Uint8Array(width * 4);
-  const lane = RIVER.clone().convertLinearToSRGB();
-  const divider = RIVER_DEEP.clone().convertLinearToSRGB();
-  for (let x = 0; x < width; x += 1) {
-    const edge = x % 32;
-    const colour = edge === 0 || edge === 31 ? divider : lane;
-    data.set(
-      [Math.round(colour.r * 255), Math.round(colour.g * 255), Math.round(colour.b * 255), 255],
-      x * 4,
-    );
-  }
-  const texture = new DataTexture(data, width, 1, RGBAFormat);
-  texture.magFilter = LinearFilter;
-  texture.minFilter = LinearFilter;
-  texture.colorSpace = SRGBColorSpace;
-  texture.needsUpdate = true;
-  return texture;
 }
 
 /** A brightness ramp along the plane's v axis, white on black, for soft additive glows. */
@@ -225,7 +205,14 @@ export interface GameStage {
   onJudgment(event: Readonly<JudgmentEvent>): void;
   /** Whether a lane is held, for its highlight. */
   setLaneHeld(isHeld: (lane: number) => boolean): void;
-  resize(width: number, height: number): void;
+  /**
+   * Fits the camera to a viewport in CSS px, switching layout if its shape calls for
+   * another (`layout`). `insets` are the safe-area insets, which the tabletop layout
+   * keeps its lanes and top band inside.
+   */
+  resize(width: number, height: number, insets?: Readonly<Insets>): void;
+  /** The layout in use: portrait is handheld, landscape tabletop. Changes in `resize`. */
+  readonly layout: LayoutKind;
   /** The lane under a client point, or undefined off the lanes. */
   laneAt(clientX: number, clientY: number): number | undefined;
   /** The hit line's height on screen, 0 (top) to 1 (bottom). */
@@ -256,28 +243,14 @@ export function createGameStage({
   const fog = new Fog(RIVER_DEEP, 1, 2);
   scene.fog = fog;
 
-  const camera = new PerspectiveCamera(38, 1, 0.1, 100);
-  const view: CameraFit = {
-    target: new Vector3(0, 0, -3.2),
-    direction: new Vector3(0, 0.62, 0.78).normalize(),
-    keepVisible: [
-      new Vector3(-HIGHWAY_WIDTH / 2 - 0.25, 0, 0),
-      new Vector3(HIGHWAY_WIDTH / 2 + 0.25, 0, 0),
-      new Vector3(-HIGHWAY_WIDTH / 2, 0, HIGHWAY_NEAR),
-      new Vector3(HIGHWAY_WIDTH / 2, 0, HIGHWAY_NEAR),
-      new Vector3(0, 0, -HIGHWAY_FAR * 0.75),
-    ],
-    margin: { x: 0.94, y: 0.9 },
-  };
+  const camera = new PerspectiveCamera(HANDHELD.fov, 1, 0.1, 100);
+  // Chosen again by `resize()`; everything below reads it when it is used.
+  let layout: HighwayLayout = HANDHELD;
   const viewDepth = (point: Vector3) => -point.clone().applyMatrix4(camera.matrixWorldInverse).z;
 
   // Reused every frame and every touch.
   const dummy = new Object3D();
   const colour = new Color();
-  const raycaster = new Raycaster();
-  const pointer = new Vector2();
-  const ground = new Plane(new Vector3(0, 1, 0), 0);
-  const hit = new Vector3();
   const projected = new Vector3();
   const laneGlow = new Float32Array(LANES);
   const lanePulse = new Float64Array(LANES).fill(-Infinity);
@@ -304,8 +277,8 @@ export function createGameStage({
 
   const build = (): Resources => {
     builds += 1;
+    const { far, near, tileWidth, tileDepth: tileLength, hitLine, glowLength } = layout;
     const root = new Object3D();
-    const laneTexture = createLaneTexture();
     const glowTexture = createFalloffTexture((v) =>
       v < 0.04 ? (v / 0.04) ** 2 : (1 - (v - 0.04) / 0.96) ** 2,
     );
@@ -336,16 +309,23 @@ export function createGameStage({
     waterMesh.renderOrder = -1;
     root.add(waterMesh);
 
-    const highwayGeometry = new PlaneGeometry(HIGHWAY_WIDTH, HIGHWAY_FAR + HIGHWAY_NEAR);
+    const highwayGeometry = new PlaneGeometry(HIGHWAY_WIDTH + 2 * EDGE_MARGIN, far + near);
     highwayGeometry.rotateX(-Math.PI / 2);
-    highwayGeometry.translate(0, 0, (HIGHWAY_NEAR - HIGHWAY_FAR) / 2);
-    const highwayMaterial = new MeshBasicMaterial({ map: laneTexture });
-    root.add(new Mesh(highwayGeometry, highwayMaterial));
+    highwayGeometry.translate(0, 0, (near - far) / 2);
+    const highwayMaterial = createHighwayMaterial({
+      lane: RIVER,
+      divider: RIVER_DEEP,
+      near,
+    });
+    const highwayMesh = new Mesh(highwayGeometry, highwayMaterial);
+    // Alpha-blended, so it draws first among the transparent layers that sit on it.
+    highwayMesh.renderOrder = -1;
+    root.add(highwayMesh);
 
     // Per-lane glow: held lanes, hits, and red for a snag. Additive: black is invisible.
-    const glowGeometry = new PlaneGeometry(LANE_WIDTH * 0.94, 4);
+    const glowGeometry = new PlaneGeometry(LANE_WIDTH * 0.94, glowLength);
     glowGeometry.rotateX(-Math.PI / 2);
-    glowGeometry.translate(0, 0.002, -1.85);
+    glowGeometry.translate(0, 0.002, 0.15 - glowLength / 2);
     const glowMaterial = new MeshBasicMaterial({ map: glowTexture, ...additive });
     const glows = new InstancedMesh(glowGeometry, glowMaterial, LANES);
     for (let lane = 0; lane < LANES; lane += 1) {
@@ -357,13 +337,13 @@ export function createGameStage({
     }
     root.add(glows);
 
-    const lineGeometry = new PlaneGeometry(HIGHWAY_WIDTH + 0.5, 0.09);
+    const lineGeometry = new PlaneGeometry(HIGHWAY_WIDTH + 2 * hitLine.overhang, hitLine.thickness);
     lineGeometry.rotateX(-Math.PI / 2);
     lineGeometry.translate(0, 0.004, 0);
     const lineMaterial = new MeshBasicMaterial({ color: RIPPLE, fog: false });
     root.add(new Mesh(lineGeometry, lineMaterial));
 
-    const haloGeometry = new PlaneGeometry(HIGHWAY_WIDTH + 0.5, 0.7);
+    const haloGeometry = new PlaneGeometry(HIGHWAY_WIDTH + 2 * hitLine.overhang, hitLine.halo);
     haloGeometry.rotateX(-Math.PI / 2);
     haloGeometry.translate(0, 0.003, 0);
     const haloMaterial = new MeshBasicMaterial({
@@ -381,19 +361,19 @@ export function createGameStage({
     const bodies = dynamicMesh(bodyGeometry, bodyMaterial, MAX_HOLD_SEGMENTS, root);
 
     // A bridge joins the two tiles of a double.
-    const bridgeGeometry = new PlaneGeometry(1, 0.1);
+    const bridgeGeometry = new PlaneGeometry(1, tileLength * 0.24);
     bridgeGeometry.rotateX(-Math.PI / 2);
     bridgeGeometry.translate(0, 0.008, 0);
     const bridgeMaterial = new MeshBasicMaterial();
     const bridges = dynamicMesh(bridgeGeometry, bridgeMaterial, MAX_BRIDGES, root);
 
-    const tileGeometry = new ShapeGeometry(roundedTileShape(TILE_WIDTH, TILE_DEPTH, 0.16), 6);
+    const tileGeometry = new ShapeGeometry(roundedTileShape(tileWidth, tileLength), 6);
     tileGeometry.rotateX(-Math.PI / 2);
     tileGeometry.translate(0, 0.01, 0);
     const tileMaterial = new MeshBasicMaterial();
     const tiles = dynamicMesh(tileGeometry, tileMaterial, MAX_TILES, root);
 
-    const flashGeometry = new ShapeGeometry(roundedTileShape(TILE_WIDTH, TILE_DEPTH, 0.16), 6);
+    const flashGeometry = new ShapeGeometry(roundedTileShape(tileWidth, tileLength), 6);
     flashGeometry.rotateX(-Math.PI / 2);
     flashGeometry.translate(0, 0.012, 0);
     const flashMaterial = new MeshBasicMaterial({ ...additive });
@@ -439,7 +419,7 @@ export function createGameStage({
         rippleMaterial,
         dropletMaterial,
       ],
-      textures: [laneTexture, glowTexture, haloTexture, dotTexture],
+      textures: [glowTexture, haloTexture, dotTexture],
       water,
       glows,
       tiles,
@@ -505,7 +485,7 @@ export function createGameStage({
       const speed = 1.6 + Math.random() * 2.2;
       dropletVelocity[slot * 2] = Math.cos(angle) * speed;
       dropletVelocity[slot * 2 + 1] = -Math.sin(angle) * speed * 0.7;
-      dropletOrigin[slot] = (Math.random() - 0.5) * TILE_WIDTH * 0.6;
+      dropletOrigin[slot] = (Math.random() - 0.5) * layout.tileWidth * 0.6;
     }
   };
 
@@ -529,6 +509,7 @@ export function createGameStage({
       res.bridges.count = 0;
       return;
     }
+    const { far, near, tileWidth, tileDepth: tileLength } = layout;
     const all = config.chart.difficulties[config.difficulty].tiles;
     if (measured !== all) {
       measured = all;
@@ -536,8 +517,8 @@ export function createGameStage({
     }
     const songMs = stage.songMs;
     const windowMs = config.scrollDurationMs * config.tempo;
-    const msPerUnit = windowMs / HIGHWAY_FAR;
-    const behindMs = (HIGHWAY_NEAR + TILE_DEPTH) * msPerUnit;
+    const msPerUnit = windowMs / far;
+    const behindMs = (near + tileLength) * msPerUnit;
     const aheadMs = windowMs * 1.02;
     const failure =
       stage.state === 'failing' || stage.state === 'finished' ? simulation?.failure : undefined;
@@ -551,21 +532,21 @@ export function createGameStage({
       const tail = simulation?.tails[i] ?? TAIL.none;
       // Past its late boundary: the Miss is only waiting for in-flight input.
       const lapsed = head === HEAD.pending && songMs > headDeadline(tile.t, config.tempo);
-      const z = tileDepth(tile.t, songMs, windowMs, HIGHWAY_FAR);
+      const z = tileDepth(tile.t, songMs, windowMs, far);
 
       if (tile.dur !== undefined && bodyCount + 2 <= MAX_HOLD_SEGMENTS) {
         const end = tileEnd(tile);
-        const endZ = Math.max(-HIGHWAY_FAR * 1.02, tileDepth(end, songMs, windowMs, HIGHWAY_FAR));
-        const startZ = Math.min(HIGHWAY_NEAR, z);
+        const endZ = Math.max(-far * 1.02, tileDepth(end, songMs, windowMs, far));
+        const startZ = Math.min(near, z);
         const holding = tail === TAIL.holding || tail === TAIL.suspended;
         const done = tail === TAIL.perfect;
-        if (!done && endZ < HIGHWAY_NEAR) {
+        if (!done && endZ < near) {
           if (tail === TAIL.missed || head === HEAD.missed || lapsed) {
             // From where it was let go (or the whole hold) up to its tail.
             const stopped = simulation?.holdEndMs[i] ?? Number.NaN;
             const fromZ = Number.isNaN(stopped)
               ? startZ
-              : Math.min(HIGHWAY_NEAR, tileDepth(stopped, songMs, windowMs, HIGHWAY_FAR));
+              : Math.min(near, tileDepth(stopped, songMs, windowMs, far));
             colour.copy(i === offender ? SNAG : MISSED_BODY);
             placeSegment(res.bodies, bodyCount, tile.lane, fromZ, endZ);
             bodyCount += 1;
@@ -586,7 +567,7 @@ export function createGameStage({
       }
 
       const hitHead = head === HEAD.perfect || head === HEAD.good;
-      if (hitHead || z > HIGHWAY_NEAR + TILE_DEPTH || z < -HIGHWAY_FAR * 1.02) continue;
+      if (hitHead || z > near + tileLength || z < -far * 1.02) continue;
       if (tileCount >= MAX_TILES) continue;
       if (head === HEAD.missed || lapsed) {
         colour.copy(i === offender ? SNAG : MISSED_TILE);
@@ -611,8 +592,8 @@ export function createGameStage({
         simulation?.heads[i + 1] !== HEAD.good &&
         bridgeCount < MAX_BRIDGES
       ) {
-        const left = laneX(tile.lane) + TILE_WIDTH / 2;
-        const right = laneX(partner.lane) - TILE_WIDTH / 2;
+        const left = laneX(tile.lane) + tileWidth / 2;
+        const right = laneX(partner.lane) - tileWidth / 2;
         dummy.position.set((left + right) / 2, 0, z);
         dummy.scale.set(Math.max(0.01, right - left), 1, 1);
         dummy.updateMatrix();
@@ -726,6 +707,11 @@ export function createGameStage({
 
   resources = build();
 
+  const rebuild = () => {
+    if (resources) release(resources);
+    resources = build();
+  };
+
   return {
     render(stage, deltaSeconds, renderer) {
       clock += deltaSeconds;
@@ -763,26 +749,33 @@ export function createGameStage({
       isLaneHeld = next;
     },
 
-    resize(width, height) {
-      fitCamera(camera, width / height, view);
-      fog.near = viewDepth(projected.set(0, 0, 0)) + HIGHWAY_FAR * 0.3;
-      fog.far = viewDepth(projected.set(0, 0, -HIGHWAY_FAR));
+    resize(width, height, insets = NO_INSETS) {
+      const next = selectLayout(width, height);
+      if (next !== layout) {
+        layout = next;
+        // The lanes' geometry belongs to the layout: build it again.
+        if (resources) rebuild();
+      }
+      frameLayout(camera, layout, width, height, insets);
+      const lineDepth = viewDepth(projected.set(0, 0, 0));
+      const endDepth = viewDepth(projected.set(0, 0, -layout.far));
+      fog.near = lineDepth + (endDepth - lineDepth) * layout.fogFrom;
+      fog.far = endDepth;
+    },
+
+    get layout() {
+      return layout.kind;
     },
 
     laneAt(clientX, clientY) {
       const rect = surface.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) return undefined;
-      pointer.set(
+      return laneAtNdc(
+        camera,
         ((clientX - rect.left) / rect.width) * 2 - 1,
         -((clientY - rect.top) / rect.height) * 2 + 1,
+        layout,
       );
-      raycaster.setFromCamera(pointer, camera);
-      if (!raycaster.ray.intersectPlane(ground, hit)) return undefined;
-      return laneForPoint(hit.x, hit.z, {
-        halfWidth: HIGHWAY_WIDTH / 2 + TOUCH_SLACK.side,
-        far: HIGHWAY_FAR,
-        near: HIGHWAY_NEAR + TOUCH_SLACK.near,
-      });
     },
 
     hitLineY() {
@@ -790,10 +783,7 @@ export function createGameStage({
       return (1 - projected.y) / 2;
     },
 
-    rebuild() {
-      if (resources) release(resources);
-      resources = build();
-    },
+    rebuild,
     get builds() {
       return builds;
     },

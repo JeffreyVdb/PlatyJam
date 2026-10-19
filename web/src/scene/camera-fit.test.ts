@@ -42,4 +42,22 @@ describe('fitCamera', () => {
       landscape.position.distanceTo(fit.target),
     );
   });
+
+  it('keeps keepAcross points inside the sides but lets them run off the top and bottom', () => {
+    const camera = new PerspectiveCamera(38, 1, 0.1, 100);
+    const across = [new Vector3(-2, 0, 6), new Vector3(2, 0, 6)];
+    // Without keepAcross the near corners would have to fit vertically too.
+    const withAcross: CameraFit = { ...fit, keepAcross: across };
+    fitCamera(camera, 1180 / 820, withAcross);
+    for (const point of across) {
+      const ndc = point.clone().project(camera);
+      expect(Math.abs(ndc.x)).toBeLessThanOrEqual(fit.margin.x + 1e-6);
+    }
+    const strict = new PerspectiveCamera(38, 1, 0.1, 100);
+    fitCamera(strict, 1180 / 820, { ...fit, keepVisible: [...fit.keepVisible, ...across] });
+    // Held to the screen's height as well, the camera has to sit further back.
+    expect(strict.position.distanceTo(fit.target)).toBeGreaterThan(
+      camera.position.distanceTo(fit.target),
+    );
+  });
 });

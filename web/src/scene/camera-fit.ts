@@ -7,6 +7,11 @@ export interface CameraFit {
   direction: Vector3;
   /** World points that must stay on screen. */
   keepVisible: readonly Vector3[];
+  /**
+   * World points whose sideways position must stay on screen but which may sit off
+   * the top or bottom: where a surface runs past the screen edge.
+   */
+  keepAcross?: readonly Vector3[];
   /** Fraction of the half-screen the points may use, per axis. */
   margin: { x: number; y: number };
 }
@@ -16,14 +21,21 @@ const projected = new Vector3();
 function fits(camera: PerspectiveCamera, fit: CameraFit): boolean {
   camera.updateMatrixWorld();
   camera.updateProjectionMatrix();
-  return fit.keepVisible.every((point) => {
+  const onScreen = (point: Vector3, checkHeight: boolean) => {
     projected.copy(point).applyMatrix4(camera.matrixWorldInverse);
     // Behind the near plane never fits. The far plane is ignored on purpose, so that
     // moving the camera back always helps and the search below stays monotonic.
     if (projected.z > -camera.near) return false;
     projected.applyMatrix4(camera.projectionMatrix);
-    return Math.abs(projected.x) <= fit.margin.x && Math.abs(projected.y) <= fit.margin.y;
-  });
+    return (
+      Math.abs(projected.x) <= fit.margin.x &&
+      (!checkHeight || Math.abs(projected.y) <= fit.margin.y)
+    );
+  };
+  return (
+    fit.keepVisible.every((point) => onScreen(point, true)) &&
+    (fit.keepAcross ?? []).every((point) => onScreen(point, false))
+  );
 }
 
 /**

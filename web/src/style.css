@@ -908,6 +908,31 @@ body {
   color: var(--snag);
 }
 
+/*
+ * Landscape (PLA-8): the iPad lies on the table and the four lanes run edge to edge
+ * as piano keys, so the HUD keeps to the band the stage leaves clear along the top
+ * (HUD_BAND_PX in scene/highway-layout.ts): score and progress at the left, the
+ * combo and judgment in the middle, pause at the right. Nothing sits on the keys.
+ * `data-layout` is set from the same measurement that chooses the stage's layout.
+ */
+.hud[data-layout='tabletop'] .play-centre {
+  top: calc(env(safe-area-inset-top) + var(--edge));
+}
+
+.hud[data-layout='tabletop'] .play-judgment {
+  font-size: 2rem;
+}
+
+/* Measures the safe-area insets for script (see app/safe-area.ts). */
+.hud > .safe-area-probe {
+  position: fixed;
+  inset: 0;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
+  visibility: hidden;
+  pointer-events: none;
+}
+
 /* ---- Pause, countdown and results (PLA-7) ---- */
 
 .hud > .game-sheet {
