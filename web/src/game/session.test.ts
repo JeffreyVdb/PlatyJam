@@ -441,6 +441,32 @@ describe('game session', () => {
       expect(session.stats()).toMatchObject({ perfect: 3, miss: 1 });
     });
 
+    it('completes a hold still held at its tail when pausing just after it', async () => {
+      await loaded([hold(1000, 0, 1000)]);
+      session.start();
+      frames(2000);
+      press('a', 0);
+      frames(1020); // song ≈ 2020: past the tail, still held, not yet finalized
+      expect(session.stats()).toMatchObject({ perfect: 1 });
+      session.pause();
+      expect(session.stats()).toMatchObject({ perfect: 2, miss: 0 });
+      expect(session.pauseInfo?.heldLanes).toEqual([]);
+      session.resume();
+      await vi.advanceTimersByTimeAsync(COUNTDOWN_BEAT_MS * 3);
+      expect(session.state).toBe('playing');
+      expect(session.stats()).toMatchObject({ perfect: 2, miss: 0 });
+    });
+
+    it('settles a Miss already due when pausing, then fails instead of pausing', async () => {
+      await loaded([tap(1000, 0), tap(3000, 1)]);
+      session.start();
+      frames(2200); // song ≈ 1200: the tap at 1000 is past its late boundary
+      expect(session.state).toBe('playing');
+      session.pause();
+      expect(session.state).toBe('failing');
+      expect(session.pauseInfo).toBeUndefined();
+    });
+
     it('fails Classic on resume when a held lane was not reclaimed', async () => {
       await loaded([hold(1000, 0, 2000)]);
       session.start();

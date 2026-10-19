@@ -85,7 +85,10 @@ export interface Simulation {
   /** Time reached `songMs`: finalize expiries and completions before it. */
   advance(songMs: number): void;
 
-  /** Play paused: suspend held tiles (progress kept) and forget every input. */
+  /**
+   * Play paused: suspend held tiles (progress kept) and forget every input. Call
+   * `advance` up to the pause first, so holds already past their tail complete.
+   */
   pause(): void;
   /** During the countdown: binds `input` to the suspended hold in `lane`, if any. */
   reclaim(input: string, lane: number): boolean;

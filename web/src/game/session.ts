@@ -301,6 +301,14 @@ export function createGameplaySession({
     if (!sim) return;
     clearTimer();
     engine.clock.pause();
+    if (isPlaying()) {
+      // Every input made before the pause has been dispatched by now, so what is due
+      // by the pause is decided: holds still down at their tail complete, and Misses
+      // whose window closed count, before anything is suspended.
+      sim.advance(engine.clock.position());
+      afterSimulation();
+      if (sim.status !== 'running') return;
+    }
     accompaniment.pause(PAUSE_FADE_MS);
     holdVoices.clear();
     sim.pause();
