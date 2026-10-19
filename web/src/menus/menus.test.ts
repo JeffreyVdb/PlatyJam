@@ -256,6 +256,17 @@ const buttonNamed = (name: string) => {
 const tap = (node: HTMLElement) => {
   node.click();
 };
+/** A finger tap as a touch browser sends it: pointer events, then a synthesized click. */
+const touchTap = (node: HTMLElement, { click = node }: { click?: HTMLElement } = {}) => {
+  const pointer = (type: string) =>
+    node.dispatchEvent(
+      new PointerEvent(type, { pointerId: 7, pointerType: 'touch', bubbles: true }),
+    );
+  pointer('pointerdown');
+  pointer('pointerup');
+  // The click goes to whatever is under the finger once pointerup has run.
+  click.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+};
 const toSongs = (session: FakeSession) => {
   tap(q('.home-tile'));
   session.ready();
@@ -403,6 +414,34 @@ describe('menus', () => {
     tap(buttonNamed('Quit'));
     expect(session.calls.at(-1)).toBe('quit');
     expect(menus?.view).toBe('songs');
+  });
+
+  it("never lets a touch's click land on the screen its command opened", () => {
+    const { session, store } = setup();
+    // Home's Tap to play opens the songs: the click lands on a song row.
+    session.ready();
+    touchTap(q('.home-tile'), { click: q('.home-tile') });
+    expect(menus?.view).toBe('songs');
+    // Song select is built once: the same row is back under the finger after Quit.
+    const busy = q('.song-input[value="busy"]') as HTMLInputElement;
+    busy.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(busy.checked).toBe(false);
+
+    // Quit on the pause screen: the reported case.
+    tap(q('.play-tile'));
+    session.set('playing');
+    session.pause();
+    const loads = session.loads.length;
+    touchTap(buttonNamed('Quit'), { click: busy });
+    expect(menus?.view).toBe('songs');
+    expect(busy.isConnected).toBe(true);
+    expect(busy.checked).toBe(false);
+    expect(store.settings.songId).toBe('gentle');
+    expect(session.loads).toHaveLength(loads);
+
+    // The next real tap on the row picks it.
+    touchTap(busy);
+    expect(store.settings.songId).toBe('busy');
   });
 
   it('shows how to get the sound back on the pause screen', () => {

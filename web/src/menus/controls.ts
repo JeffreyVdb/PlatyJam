@@ -26,11 +26,46 @@ const isUnavailable = (node: HTMLElement) =>
   (node instanceof HTMLButtonElement && node.disabled) ||
   node.getAttribute('aria-disabled') === 'true';
 
+/** Until when (event time) the touch that ran a command may still send its click. */
+let swallowBefore = -Infinity;
+let guardInstalled = false;
+
+/**
+ * After a touch runs a command, its compatibility mouse events and click are dropped
+ * wherever they land: the command may have swapped the screen, and the click goes to
+ * whatever is now under the finger (Quit's would pick a song). One click at most;
+ * the next pointer or key press ends it, so a real tap right after still works.
+ */
+function swallowClickAfter(touchedAt: number) {
+  swallowBefore = touchedAt + CLICK_AFTER_TOUCH_MS;
+  if (guardInstalled) return;
+  guardInstalled = true;
+  const capture = { capture: true };
+  const disarm = () => {
+    swallowBefore = -Infinity;
+  };
+  document.addEventListener('pointerdown', disarm, capture);
+  document.addEventListener('keydown', disarm, capture);
+  for (const type of ['mousedown', 'mouseup', 'click']) {
+    document.addEventListener(
+      type,
+      (event) => {
+        if (event.timeStamp >= swallowBefore) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (type === 'click') disarm();
+      },
+      capture,
+    );
+  }
+}
+
 /**
  * Runs `onTap` for a command that may need to start audio. `pointerup` is the touch
  * gesture WebKit honours; `click` covers mouse and keyboard. The `click` a touch
  * synthesizes afterwards is swallowed, so a command such as Restart runs once, and
- * a touch that moved (a scroll that ended on the button) does nothing.
+ * never reaches the screen the command opened (see `swallowClickAfter`). A touch
+ * that moved (a scroll that ended on the button) does nothing.
  */
 export function onGesture(node: HTMLElement, onTap: () => void): void {
   let touchedAt = -Infinity;
@@ -50,7 +85,9 @@ export function onGesture(node: HTMLElement, onTap: () => void): void {
     down = undefined;
     if (start?.id !== event.pointerId) return;
     if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > TAP_SLOP_PX) return;
-    if (!isUnavailable(node)) onTap();
+    if (isUnavailable(node)) return;
+    swallowClickAfter(event.timeStamp);
+    onTap();
   });
   node.addEventListener('click', (event) => {
     if (event.timeStamp - touchedAt < CLICK_AFTER_TOUCH_MS) return;
