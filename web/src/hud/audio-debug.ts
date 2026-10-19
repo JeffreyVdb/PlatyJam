@@ -188,7 +188,7 @@ export function createAudioDebugSection({
       `Audio session: ${s.audioSession}`,
       `Unlock attempts: ${unlocks || 'none'}${s.unlockedBy ? `; unlocked by ${s.unlockedBy}` : ''}`,
       `Piano samples ${samples.progress.loaded} of ${samples.progress.total}${samples.progress.failed ? `, ${samples.progress.failed} failed` : ''}`,
-      `Voices ${piano.activeVoices()}, context recreated ${s.recreations}×${s.needsRecreate ? ' (next tap recreates)' : ''}`,
+      `Voices ${audio.activeVoices()}, context recreated ${s.recreations}×${s.needsRecreate ? ' (next tap recreates)' : ''}`,
       `Calibration: sound ${audioOffsetMs} ms, touch ${inputOffsetMs} ms`,
     ].join('\n');
   };
