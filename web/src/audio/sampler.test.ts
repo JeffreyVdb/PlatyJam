@@ -56,6 +56,7 @@ class FakeParam {
 
 class FakeSource {
   buffer: AudioBuffer | null = null;
+  playbackRate = { value: 1 };
   onended: (() => void) | null = null;
   startedAt: number | undefined;
   stoppedAt: number | undefined;
@@ -122,6 +123,44 @@ describe('createSampler', () => {
       ['set', 1, 15 - TAIL_FADE_S],
       ['ramp', 0, 15],
     ]);
+  });
+
+  describe('pitch rate (the pianos following a recording at another speed)', () => {
+    it('plays at concert pitch by default', () => {
+      const { sources, sampler } = setup();
+      expect(sampler.playbackRate).toBe(1);
+      sampler.noteOn(60, 127);
+      expect(sources[0]?.playbackRate.value).toBe(1);
+    });
+
+    it('plays new notes at the rate, and shortens the sample by it', () => {
+      const { sources, gains, sampler } = setup();
+      sampler.setPlaybackRate(1.5);
+      expect(sampler.playbackRate).toBe(1.5);
+      sampler.noteOn(60, 127, 12);
+      expect(sources[0]?.playbackRate.value).toBe(1.5);
+      // The 3 s sample now lasts 2 s: the tail fade and the end move with it.
+      expect(gains[0]?.calls).toEqual([
+        ['set', 1, 12],
+        ['set', 1, 14 - TAIL_FADE_S],
+        ['ramp', 0, 14],
+      ]);
+    });
+
+    it('stretches the sample when slower, so its tail is not cut off', () => {
+      const { gains, sampler } = setup();
+      sampler.setPlaybackRate(0.75);
+      sampler.noteOn(60, 127, 12);
+      expect(gains[0]?.calls[2]).toEqual(['ramp', 0, 16]);
+    });
+
+    it('leaves voices already sounding at their own rate', () => {
+      const { sources, sampler } = setup();
+      sampler.noteOn(60, 127);
+      sampler.setPlaybackRate(1.25);
+      sampler.noteOn(62, 127);
+      expect(sources.map((s) => s.playbackRate.value)).toEqual([1, 1.25]);
+    });
   });
 
   it('releases a held note from its current level over the release time, then stops it', () => {

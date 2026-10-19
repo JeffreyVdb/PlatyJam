@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { parseCatalog } from '../../src/catalog/schema.ts';
 import { type Chart, parseChart } from '../../src/chart/schema.ts';
-import { buildCatalog, formatCatalog } from './catalog.ts';
+import { buildCatalog, buildDebugCatalog, formatCatalog } from './catalog.ts';
 
 const WEB = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -59,11 +59,36 @@ describe('buildCatalog', () => {
     expect(songs.map((song) => song.id)).toEqual(['a-calm', 'b-calm', 'busy']);
   });
 
+  it('leaves debug charts out: players never see them', () => {
+    const { songs } = buildCatalog([
+      chart('real', 1000, { normal: 1 }),
+      { ...chart('debug-song', 1000, { normal: 1 }), debug: true },
+    ]);
+    expect(songs.map((song) => song.id)).toEqual(['real']);
+  });
+
   it('is valid catalog data and deterministic', () => {
     const charts = [chart('one', 1000, { normal: 1 }), chart('two', 1000, { normal: 2 })];
     const catalog = buildCatalog(charts);
     expect(parseCatalog(catalog)).toEqual(catalog);
     expect(formatCatalog(buildCatalog([...charts].reverse()))).toBe(formatCatalog(catalog));
+  });
+});
+
+describe('buildDebugCatalog', () => {
+  it('lists only the debug charts, in the same shape', () => {
+    const charts = [
+      chart('real', 1000, { normal: 1 }),
+      { ...chart('debug-b', 1000, { normal: 2 }), debug: true },
+      { ...chart('debug-a', 1000, { normal: 2 }), debug: true },
+    ];
+    const catalog = buildDebugCatalog(charts);
+    expect(catalog.songs.map((song) => song.id)).toEqual(['debug-a', 'debug-b']);
+    expect(parseCatalog(catalog)).toEqual(catalog);
+  });
+
+  it('is empty without debug charts', () => {
+    expect(buildDebugCatalog([chart('real', 1000, { normal: 1 })]).songs).toEqual([]);
   });
 });
 
@@ -77,5 +102,8 @@ describe('src/catalog/catalog.json', () => {
     const committed = await readFile(`${WEB}src/catalog/catalog.json`, 'utf8');
     expect(committed).toBe(formatCatalog(buildCatalog(charts)));
     parseCatalog(JSON.parse(committed));
+    const debug = await readFile(`${WEB}src/catalog/debug-catalog.json`, 'utf8');
+    expect(debug).toBe(formatCatalog(buildDebugCatalog(charts)));
+    parseCatalog(JSON.parse(debug));
   });
 });

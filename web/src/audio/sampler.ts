@@ -55,6 +55,13 @@ function envelopeAt(points: readonly Point[], t: number): number {
 
 export interface Sampler extends Instrument<PianoVoice> {
   activeVoices(): number;
+  /**
+   * Playback rate of the notes started from now on (1 = concert pitch). A rate of
+   * `r` sounds `12·log2(r)` semitones up and shortens each sample by `r`. Voices
+   * already sounding keep theirs.
+   */
+  readonly playbackRate: number;
+  setPlaybackRate(rate: number): void;
   /** Drops every voice without touching it: their context was closed and replaced. */
   reset(): void;
 }
@@ -73,6 +80,7 @@ export interface SamplerOptions {
  */
 export function createSampler({ target, buffers }: SamplerOptions): Sampler {
   let voices: Voice[] = [];
+  let playbackRate = 1;
 
   const forget = (voice: Voice) => {
     voices = voices.filter((v) => v !== voice);
@@ -125,9 +133,10 @@ export function createSampler({ target, buffers }: SamplerOptions): Sampler {
 
       const source = ctx.createBufferSource();
       source.buffer = buffer;
+      source.playbackRate.value = playbackRate;
       const gain = ctx.createGain();
       const peak = velocityGain(velocity);
-      const end = start + buffer.duration;
+      const end = start + buffer.duration / playbackRate;
       const envelope = [
         { t: start, v: peak },
         { t: end - TAIL_FADE_S, v: peak },
@@ -163,6 +172,13 @@ export function createSampler({ target, buffers }: SamplerOptions): Sampler {
     },
 
     activeVoices: () => voices.length,
+
+    get playbackRate() {
+      return playbackRate;
+    },
+    setPlaybackRate(rate) {
+      playbackRate = Number.isFinite(rate) && rate > 0 ? rate : 1;
+    },
 
     reset() {
       voices = [];

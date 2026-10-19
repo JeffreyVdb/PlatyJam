@@ -10,6 +10,13 @@ describe('mediaCacheFor', () => {
     expect(at('songs/twinkle/chart.json')).toBe(SONGS_CACHE);
   });
 
+  it("routes a song's recording to the songs cache, so it plays offline once played", () => {
+    // `chart.audio.src` is under the app base: `songs/<id>.m4a` (or `.mp3`).
+    expect(at('songs/debug-backing.m4a')).toBe(SONGS_CACHE);
+    expect(at('songs/some-song.mp3')).toBe(SONGS_CACHE);
+    expect(at('songs/some-song.m4a?v=2')).toBe(SONGS_CACHE);
+  });
+
   it('routes everything under soundfonts/ to the soundfonts cache', () => {
     expect(at('soundfonts/piano.sf2')).toBe(SOUNDFONTS_CACHE);
     expect(at('soundfonts/piano/C4.ogg')).toBe(SOUNDFONTS_CACHE);

@@ -301,6 +301,14 @@ describe('convertMidi timing and metadata', () => {
   });
 });
 
+describe('convertMidi debug flag', () => {
+  it('marks a debug song in its chart, and leaves other charts without the field', () => {
+    const notes = [{ beat: 0, len: 1, pitch: 60 }];
+    expect(convert(melody(notes), { debug: true }).chart.debug).toBe(true);
+    expect('debug' in convert(melody(notes)).chart).toBe(false);
+  });
+});
+
 describe('convertMidi melody selection', () => {
   const tracks: FixtureTrack[] = [
     {

@@ -18,7 +18,8 @@
     "icons": "node scripts/generate-icons.mjs",
     "charts": "node scripts/midi-to-chart.ts",
     "generate-song": "node scripts/generate-song.ts",
-    "credits": "node scripts/generate-credits.ts"
+    "credits": "node scripts/generate-credits.ts",
+    "backing-fixture": "node scripts/generate-backing-fixture.ts"
   },
   "dependencies": {
     "@fontsource-variable/shantell-sans": "^5.3.0",

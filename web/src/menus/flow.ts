@@ -93,12 +93,15 @@ export function playButtonFor({
   switch (state) {
     case 'loading': {
       const { chartLoaded, samples } = loading;
+      const pianoDone = samples.loaded + samples.failed >= samples.total;
       return {
         action: 'wait',
         label: 'Loading',
-        note: chartLoaded
-          ? `Tuning the piano: ${samples.loaded + samples.failed} of ${samples.total} notes`
-          : 'Fetching the song',
+        note: !chartLoaded
+          ? 'Fetching the song'
+          : pianoDone && loading.backing === 'loading'
+            ? 'Fetching the recording'
+            : `Tuning the piano: ${samples.loaded + samples.failed} of ${samples.total} notes`,
       };
     }
     case 'error':

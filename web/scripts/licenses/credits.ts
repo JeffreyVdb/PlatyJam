@@ -27,7 +27,7 @@ export function buildCredits(manifest: Manifest): Credits {
     kind,
     title: SECTION_TITLES[kind],
     items: manifest.entries
-      .filter((entry) => SECTION_OF[entry.kind] === kind)
+      .filter((entry) => SECTION_OF[entry.kind] === kind && !(entry.kind === 'song' && entry.debug))
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
       .map(toCredit),
   }));

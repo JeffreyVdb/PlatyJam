@@ -9,6 +9,9 @@ import type { Chart, Tile } from '../chart/schema';
 import {
   COUNTDOWN_BEAT_MS,
   createGameplaySession,
+  END_FADE_MS,
+  FAIL_FADE_MS,
+  QUIT_FADE_MS,
   REWIND_DURATION_MS,
   REWIND_SONG_MS,
   type SessionAudio,
@@ -89,6 +92,29 @@ function fakeAudio() {
     stopAll: vi.fn(),
   };
   const accompaniment = { play: vi.fn(), pause: vi.fn(), stopAll: vi.fn() };
+  // The recording: loads at once (as `loaded`) unless `holdBacking` or `failBacking` say otherwise.
+  const backingControl = { hold: false, fail: false };
+  let releaseBacking: () => void = () => undefined;
+  const backing = {
+    state: 'none' as 'none' | 'loading' | 'loaded' | 'failed',
+    load: vi.fn(async (audio: { src: string } | undefined) => {
+      if (!audio) {
+        backing.state = 'none';
+        return;
+      }
+      backing.state = 'loading';
+      if (backingControl.hold) {
+        await new Promise<void>((resolve) => {
+          releaseBacking = resolve;
+        });
+      }
+      backing.state = backingControl.fail ? 'failed' : 'loaded';
+    }),
+    play: vi.fn(),
+    pause: vi.fn(),
+    stopAll: vi.fn(),
+  };
+  const setTuning = vi.fn();
   let finishSamples: (samples: { failed: number[] }) => void = () => undefined;
   const samples = {
     progress: { loaded: 0, failed: 0, total: 88 },
@@ -96,13 +122,26 @@ function fakeAudio() {
       finishSamples = resolve;
     }),
   };
-  const audio = { engine, piano, accompaniment, samples } as unknown as SessionAudio;
+  const audio = {
+    engine,
+    piano,
+    accompaniment,
+    backing,
+    setTuning,
+    samples,
+  } as unknown as SessionAudio;
   return {
     audio,
     engine,
     piano,
     voices,
     accompaniment,
+    backing,
+    setTuning,
+    backingControl,
+    releaseBacking: () => {
+      releaseBacking();
+    },
     /** Finishes loading the piano; `failed` lists the MIDI notes that did not load. */
     finishSamples: (failed: number[] = []) => {
       samples.progress = { loaded: 88 - failed.length, failed: failed.length, total: 88 };
@@ -441,6 +480,193 @@ describe('game session', () => {
         stars: 3,
         perfectBadge: true,
       });
+    });
+  });
+
+  describe("the song's recording", () => {
+    const withAudio = (overrides: Partial<Chart> = {}) => ({
+      ...chartWith([tap(1000, 0), tap(3000, 1)]),
+      audio: { src: 'songs/test-song.m4a', offsetMs: 300 },
+      ...overrides,
+    });
+    const loadedWithAudio = async (overrides: Partial<SessionSetup> = {}) => {
+      await loaded([], { chart: withAudio(), ...overrides });
+    };
+
+    it('does not load or play one for a chart without audio', async () => {
+      await loaded([tap(1000, 0)]);
+      expect(fake.backing.load).toHaveBeenCalledWith(undefined);
+      expect(session.loading.backing).toBe('none');
+      session.start();
+      // Called, as every run does; with nothing loaded the real player does nothing.
+      expect(fake.backing.play).toHaveBeenCalledOnce();
+      expect(fake.setTuning).toHaveBeenLastCalledWith(1);
+    });
+
+    it('loads the recording named by the chart while the piano loads', async () => {
+      await loadedWithAudio();
+      expect(fake.backing.load).toHaveBeenCalledWith({ src: 'songs/test-song.m4a', offsetMs: 300 });
+      expect(session.loading.backing).toBe('loaded');
+    });
+
+    it('stays loading until the recording has loaded, however early the piano is in', async () => {
+      fake.backingControl.hold = true;
+      session.load(setup([], { chart: withAudio() }));
+      fake.finishSamples();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(session.state).toBe('loading');
+      expect(session.loading.backing).toBe('loading');
+      session.start();
+      expect(session.state).toBe('loading');
+      fake.releaseBacking();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(session.state).toBe('ready');
+    });
+
+    it('stays loading until the chart is in before it names a recording', async () => {
+      let deliver: (chart: Chart) => void = () => undefined;
+      session.load({
+        ...setup([]),
+        chart: new Promise<Chart>((resolve) => {
+          deliver = resolve;
+        }),
+      });
+      fake.finishSamples();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fake.backing.load).not.toHaveBeenCalled();
+      expect(session.state).toBe('loading');
+      deliver(withAudio());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(session.state).toBe('ready');
+    });
+
+    it('leaves the recording alone when an overtaken load resolves after the next one started', async () => {
+      let deliverStale: (chart: Chart) => void = () => undefined;
+      session.load({
+        ...setup([]),
+        chart: new Promise<Chart>((resolve) => {
+          deliverStale = resolve;
+        }),
+      });
+      await loadedWithAudio();
+      session.start();
+      expect(session.state).toBe('leadIn');
+      fake.backing.load.mockClear();
+      deliverStale(chartWith([tap(1000, 0)]));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fake.backing.load).not.toHaveBeenCalled();
+      expect(fake.backing.state).toBe('loaded');
+      expect(session.state).toBe('leadIn');
+    });
+
+    it('plays the song without it when it failed to load', async () => {
+      fake.backingControl.fail = true;
+      await loadedWithAudio({ tempo: 1.25 });
+      expect(session.loading.backing).toBe('failed');
+      session.start();
+      expect(session.state).toBe('leadIn');
+      // Nothing to be in tune with: concert pitch at every speed.
+      expect(fake.setTuning).toHaveBeenLastCalledWith(1);
+    });
+
+    it('starts it with the run, after the clock', async () => {
+      await loadedWithAudio();
+      const order: string[] = [];
+      fake.backing.play.mockImplementation(() => {
+        order.push(fake.engine.clock.isRunning ? 'play on a running clock' : 'play too early');
+      });
+      session.start();
+      expect(order).toEqual(['play on a running clock']);
+    });
+
+    it.each([0.75, 1, 1.25, 1.5])(
+      'tunes both pianos to the speed (%s×) when a recording plays',
+      async (tempo) => {
+        await loadedWithAudio({ tempo: tempo as 1 });
+        session.start();
+        expect(fake.setTuning).toHaveBeenLastCalledWith(tempo);
+      },
+    );
+
+    it('is back to concert pitch once the run is over', async () => {
+      await loadedWithAudio({ tempo: 1.5 });
+      session.start();
+      expect(fake.setTuning).toHaveBeenLastCalledWith(1.5);
+      session.quit();
+      expect(fake.setTuning).toHaveBeenLastCalledWith(1);
+    });
+
+    it('fades it with the music when the player pauses, and brings it back with the clock', async () => {
+      await loadedWithAudio();
+      session.start();
+      frames(500);
+      session.pause();
+      expect(fake.backing.pause).toHaveBeenCalledWith(PAUSE_FADE_MS);
+      // The engine resumes it (as it does the accompaniment) when the clock restarts:
+      // the session does not play it again itself, so the countdown stays silent.
+      session.resume();
+      await vi.advanceTimersByTimeAsync(3 * COUNTDOWN_BEAT_MS);
+      expect(fake.engine.resumeClock).toHaveBeenCalledOnce();
+      expect(fake.backing.play).toHaveBeenCalledOnce();
+    });
+
+    it('is paused when the audio is interrupted', async () => {
+      await loadedWithAudio();
+      session.start();
+      frames(500);
+      fake.engine.phase = 'interrupted';
+      fake.engine.events.emit('interrupted', { reason: 'background' });
+      expect(session.state).toBe('paused');
+      expect(fake.backing.pause).toHaveBeenCalledWith(PAUSE_FADE_MS);
+    });
+
+    it('stops with the music on a Classic failure', async () => {
+      await loadedWithAudio();
+      session.start();
+      frames(2600);
+      press('a', 0); // an empty lane
+      expect(session.state).toBe('failing');
+      expect(fake.backing.stopAll).toHaveBeenLastCalledWith(FAIL_FADE_MS);
+    });
+
+    it('fades out at the end of the song', async () => {
+      await loadedWithAudio({ chart: withAudio(), failMode: 'relaxed' });
+      session.start();
+      frames(5600);
+      expect(session.state).toBe('finished');
+      expect(fake.backing.stopAll).toHaveBeenLastCalledWith(END_FADE_MS);
+    });
+
+    it('stops on quit and on restart, and plays again from the start on restart', async () => {
+      await loadedWithAudio();
+      session.start();
+      frames(500);
+      session.quit();
+      expect(fake.backing.stopAll).toHaveBeenLastCalledWith(QUIT_FADE_MS);
+      fake.backing.stopAll.mockClear();
+      fake.backing.play.mockClear();
+
+      session.start();
+      frames(500);
+      session.restart();
+      expect(fake.backing.stopAll).toHaveBeenCalledWith(QUIT_FADE_MS);
+      expect(session.state).toBe('leadIn');
+      expect(fake.backing.play).toHaveBeenCalledTimes(2);
+    });
+
+    it('stops when something else silences the engine', async () => {
+      await loadedWithAudio();
+      session.start();
+      fake.engine.events.emit('silenced', { fadeMs: 50 });
+      expect(fake.backing.stopAll).toHaveBeenCalledWith(QUIT_FADE_MS);
+      expect(session.state).toBe('quit');
+    });
+
+    it('stops it when another song is loaded over a run', async () => {
+      await loadedWithAudio();
+      session.start();
+      session.load(setup([tap(1000, 0)]));
+      expect(fake.backing.stopAll).toHaveBeenCalled();
     });
   });
 

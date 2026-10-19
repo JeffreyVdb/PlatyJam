@@ -9,6 +9,7 @@ import { watchViewport } from './app/viewport';
 import { createGameAudio, type GameAudio } from './audio/game-audio';
 import { openCalibration } from './calibration/calibration-overlay';
 import catalogJson from './catalog/catalog.json';
+import debugCatalogJson from './catalog/debug-catalog.json';
 import { parseCatalog } from './catalog/schema';
 import { loadChart } from './chart/load';
 import creditsJson from './credits/credits.json';
@@ -111,6 +112,7 @@ function startGame(
   audio: GameAudio,
   scene: ReturnType<typeof createGameStage>,
   store: SaveStore,
+  debug: boolean,
 ): GameplaySession {
   const session = createGameplaySession({ audio, bus: lifecycle });
   const input = installLaneInput({
@@ -146,7 +148,11 @@ function startGame(
     stage,
     session,
     store,
-    songs: parseCatalog(catalogJson).songs,
+    // ?debug adds the test songs (a chart with a recording) at the end of song select.
+    songs: [
+      ...parseCatalog(catalogJson).songs,
+      ...(debug ? parseCatalog(debugCatalogJson).songs : []),
+    ],
     credits: parseCredits(creditsJson),
     charts,
     setVolume: (kind, volume) => {
@@ -231,7 +237,16 @@ function main() {
   });
 
   if (audio) {
-    session = startGame(stage, hudRoot, hud, reload, audio, scene, store);
+    session = startGame(
+      stage,
+      hudRoot,
+      hud,
+      reload,
+      audio,
+      scene,
+      store,
+      isDebugEnabled(window.location.search),
+    );
   }
 
   watchViewport({

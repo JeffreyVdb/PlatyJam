@@ -16,9 +16,14 @@ import {
   viewFor,
 } from './flow';
 
-const loading = (chartLoaded: boolean, loaded = 0): LoadingInfo => ({
+const loading = (
+  chartLoaded: boolean,
+  loaded = 0,
+  backing: LoadingInfo['backing'] = 'none',
+): LoadingInfo => ({
   chartLoaded,
   samples: { loaded, failed: 0, total: 88 },
+  backing,
 });
 
 const song = (id: string): CatalogSong => ({
@@ -100,6 +105,17 @@ describe('playButtonFor', () => {
       action: 'wait',
       label: 'Loading',
       note: 'Tuning the piano: 40 of 88 notes',
+    });
+  });
+
+  it("waits for the song's recording once the piano is in", () => {
+    const wait = (loaded: number) =>
+      playButtonFor({ ...base, state: 'loading', loading: loading(true, loaded, 'loading') });
+    expect(wait(40).note).toBe('Tuning the piano: 40 of 88 notes');
+    expect(wait(88)).toEqual({
+      action: 'wait',
+      label: 'Loading',
+      note: 'Fetching the recording',
     });
   });
 

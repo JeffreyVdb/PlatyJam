@@ -23,7 +23,11 @@ class FakeSession implements GameSession {
   state: SessionState = 'loading';
   readonly events = createEventBus<SessionEvents>();
   config: SessionConfig | undefined;
-  loading: LoadingInfo = { chartLoaded: false, samples: { loaded: 0, failed: 0, total: 88 } };
+  loading: LoadingInfo = {
+    chartLoaded: false,
+    samples: { loaded: 0, failed: 0, total: 88 },
+    backing: 'none',
+  };
   pauseInfo: PauseInfo | undefined;
   countdown: CountdownInfo | undefined;
   results: FinalResults | undefined;
@@ -54,13 +58,21 @@ class FakeSession implements GameSession {
   load(setup: SessionSetup) {
     this.loads.push(setup);
     this.calls.push('load');
-    this.loading = { chartLoaded: false, samples: { loaded: 0, failed: 0, total: 88 } };
+    this.loading = {
+      chartLoaded: false,
+      samples: { loaded: 0, failed: 0, total: 88 },
+      backing: 'none',
+    };
     this.error = undefined;
     this.set('loading');
   }
   /** The chart and piano arrived. */
   ready() {
-    this.loading = { chartLoaded: true, samples: { loaded: 88, failed: 0, total: 88 } };
+    this.loading = {
+      chartLoaded: true,
+      samples: { loaded: 88, failed: 0, total: 88 },
+      backing: 'none',
+    };
     this.set('ready');
   }
   start() {
@@ -527,7 +539,11 @@ describe('menus', () => {
   it('reloads the page when the piano notes are what failed', () => {
     const { session, reload } = setup();
     toSongs(session);
-    session.loading = { chartLoaded: true, samples: { loaded: 80, failed: 8, total: 88 } };
+    session.loading = {
+      chartLoaded: true,
+      samples: { loaded: 80, failed: 8, total: 88 },
+      backing: 'none',
+    };
     session.error = 'Some piano notes this song needs did not download.';
     session.set('error');
     expect(q('.play-tile').textContent).toBe('Reload');

@@ -32,20 +32,21 @@ PlatyJam is a musical rhythm game planned for the browser. Follow the beat, hit 
 
 Run these in `web/`:
 
-| Command              | What it does                                                                            |
-| -------------------- | --------------------------------------------------------------------------------------- |
-| `pnpm install`       | Install dependencies (CI uses `pnpm install --frozen-lockfile`)                         |
-| `pnpm dev`           | Dev server at http://127.0.0.1:44663/ (service worker off)                              |
-| `pnpm build`         | Typecheck, then build to `web/dist/` with base `/PlatyJam/`                             |
-| `pnpm preview`       | Serve `dist/` at http://127.0.0.1:36787/PlatyJam/ (with the SW)                         |
-| `pnpm test`          | Unit tests (Vitest, jsdom)                                                              |
-| `pnpm lint`          | ESLint (type-checked rules) and Prettier check                                          |
-| `pnpm format`        | Prettier write, then ESLint autofix                                                     |
-| `pnpm typecheck`     | `tsc` for the app, service worker, config and scripts projects                          |
-| `pnpm icons`         | Regenerate the app icons from `web/assets-src/`                                         |
-| `pnpm charts`        | Rebuild every song chart and the song catalog (see [Charts](#charts))                   |
-| `pnpm generate-song` | Rewrite the MIDI of each generated song (see [The song generator](#the-song-generator)) |
-| `pnpm credits`       | Regenerate the credits data from the licence manifest (see [Credits](#credits))         |
+| Command                | What it does                                                                                       |
+| ---------------------- | -------------------------------------------------------------------------------------------------- |
+| `pnpm install`         | Install dependencies (CI uses `pnpm install --frozen-lockfile`)                                    |
+| `pnpm dev`             | Dev server at http://127.0.0.1:44663/ (service worker off)                                         |
+| `pnpm build`           | Typecheck, then build to `web/dist/` with base `/PlatyJam/`                                        |
+| `pnpm preview`         | Serve `dist/` at http://127.0.0.1:36787/PlatyJam/ (with the SW)                                    |
+| `pnpm test`            | Unit tests (Vitest, jsdom)                                                                         |
+| `pnpm lint`            | ESLint (type-checked rules) and Prettier check                                                     |
+| `pnpm format`          | Prettier write, then ESLint autofix                                                                |
+| `pnpm typecheck`       | `tsc` for the app, service worker, config and scripts projects                                     |
+| `pnpm icons`           | Regenerate the app icons from `web/assets-src/`                                                    |
+| `pnpm charts`          | Rebuild every song chart and the song catalogs (see [Charts](#charts))                             |
+| `pnpm generate-song`   | Rewrite the MIDI of each generated song (see [The song generator](#the-song-generator))            |
+| `pnpm credits`         | Regenerate the credits data from the licence manifest (see [Credits](#credits))                    |
+| `pnpm backing-fixture` | Render the debug song's test recording with ffmpeg (see [The test recording](#the-test-recording)) |
 
 The build is served from `/PlatyJam/` (the GitHub Pages project site). Set `BASE_PATH=/other/` to build for another path.
 
@@ -54,7 +55,7 @@ The build is served from `/PlatyJam/` (the GitHub Pages project site). Set `BASE
 - `src/main.ts` wires the modules together; the platform logic sits in small modules under `src/app/` (lifecycle events, viewport sizing, touch guards, storage, service worker registration, the `?debug` hook).
 - `src/render/renderer-host.ts` owns the canvas, the WebGL renderer, the render loop and context-loss recovery.
 - `src/game/` is gameplay: the session contract, the simulation, judgment and scoring, lane input and the session controller (see [The game](#the-game)). `src/scene/` is the three.js stage. `src/hud/` is the HTML layer above it: the play HUD, notices, the "Tap to resume" overlay and the `?debug` Audio tools.
-- `src/menus/` is the screens around the game (see [The menus](#the-menus)): Home, song select, settings, credits, pause, countdown and results, with the navigation rules in `flow.ts`. `src/save/` is the saved settings and best scores (see [Saved data](#saved-data)). `src/catalog/` is the song catalog song select reads: its schema and `catalog.json`, which `pnpm charts` generates.
+- `src/menus/` is the screens around the game (see [The menus](#the-menus)): Home, song select, settings, credits, pause, countdown and results, with the navigation rules in `flow.ts`. `src/save/` is the saved settings and best scores (see [Saved data](#saved-data)). `src/catalog/` is the song catalog song select reads: its schema and `catalog.json`, which `pnpm charts` generates, and `debug-catalog.json`, the test songs `?debug` adds to it.
 - `src/audio/` is the audio engine (see [Audio](#audio)); `src/calibration/` is the latency calibration overlay.
 - `src/chart/` is the chart format: the schema shared with the converter (`schema.ts`) and `loadChart()` (`load.ts`).
 - `scripts/midi-to-chart.ts` and `scripts/charts/` are the MIDI-to-chart converter; `songs-src/` holds the song sources and `public/songs/` the generated charts.
@@ -83,25 +84,37 @@ Wrap storage writes in the guard from `createStorageGuard()` (`src/app/storage.t
 - The app shell (HTML, JS, CSS, font, icons) is precached and served offline, for any query string.
 - The piano samples live in `public/soundfonts/fluidr3-gm/acoustic_grand_piano/` (88 MP3s, about 1.9 MB) and are served from `<base>soundfonts/fluidr3-gm/…`. The app fetches all of them at startup, so the first online launch fills the soundfont cache and the piano then works offline.
 - Songs (`songs/…`, audio and MIDI files) and soundfonts (`soundfonts/…`, `.sf2`, `.sf3`) are cached on first use in the `platyjam-songs` and `platyjam-soundfonts` caches. They are never precached. Only whole `200` responses are stored, so load a song with `fetch()` once to make it available offline; a `Range` request from an uncached `<audio>` element passes through without being cached.
+- A song's recording (`chart.audio.src`, such as `songs/<id>.m4a`) is under `songs/`, so it goes to the same `platyjam-songs` cache. The game loads it with `fetch()` and `decodeAudioData` when the song is chosen, never with an `<audio>` element, so the whole `200` response is cached the first time and the song plays offline from then on. Until then, offline, the recording fails to load and the song plays without it (see [The song's recording](#the-songs-recording)). `src/sw/media-routes.test.ts` covers the path.
 - Updates wait: when a new version is ready, the HUD shows **Update now**. Nothing reloads until the player taps it.
 
 ## Audio
 
 Everything under `web/src/audio/`. The pure maths has no Web Audio imports and is unit-tested; only `engine.ts`, `sampler.ts`, `click.ts` and `backing-track.ts` touch Web Audio objects.
 
-| Module             | What it does                                                                                                                                                                 |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `engine.ts`        | Owns the one `AudioContext` and master gain (with the master volume): unlock, `audioSession`, interruptions, recreation, the song clock                                      |
-| `clock.ts`         | The song clock: context time to song time, with start offset, pause, resume and tempo                                                                                        |
-| `output-time.ts`   | Maps a `performance.now()` time (an `event.timeStamp`) to context time with `getOutputTimestamp()`                                                                           |
-| `timeline.ts`      | The clock plus calibrated offsets: `songTime()`, `judgeSongTime()`, `startTimeFor()`                                                                                         |
-| `sampler.ts`       | Piano voices: `noteOn` / `noteOff`, velocity curve, release envelope, 48-voice cap                                                                                           |
-| `piano-samples.ts` | Loads the 88 FluidR3 MP3s with `fetch` and `decodeAudioData`, six at a time                                                                                                  |
-| `scheduler.ts`     | Look-ahead accompaniment (25 ms tick, 100 ms horizon) and the `AccompanimentNote` type charts use                                                                            |
-| `backing-track.ts` | An optional audio file: `loadBackingTrack()` fetches and decodes it, `createBackingTrack()` starts it in sync with the clock                                                 |
-| `calibration*.ts`  | Calibration statistics, and saving the offsets                                                                                                                               |
-| `submix.ts`        | A group of voices with its own volume: a gain into the master, rebuilt when the context is recreated                                                                         |
-| `game-audio.ts`    | Wires engine, pianos and accompaniment together: the player's piano plays into the master, the accompaniment's own piano (same samples) through a submix; `main.ts` calls it |
+| Module              | What it does                                                                                                                                                                                              |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `engine.ts`         | Owns the one `AudioContext` and master gain (with the master volume): unlock, `audioSession`, interruptions, recreation, the song clock                                                                   |
+| `clock.ts`          | The song clock: context time to song time, with start offset, pause, resume and tempo                                                                                                                     |
+| `output-time.ts`    | Maps a `performance.now()` time (an `event.timeStamp`) to context time with `getOutputTimestamp()`                                                                                                        |
+| `timeline.ts`       | The clock plus calibrated offsets: `songTime()`, `judgeSongTime()`, `startTimeFor()`                                                                                                                      |
+| `sampler.ts`        | Piano voices: `noteOn` / `noteOff`, velocity curve, release envelope, 48-voice cap, and a playback rate that tunes the pianos to a recording                                                              |
+| `piano-samples.ts`  | Loads the 88 FluidR3 MP3s with `fetch` and `decodeAudioData`, six at a time                                                                                                                               |
+| `scheduler.ts`      | Look-ahead accompaniment (25 ms tick, 100 ms horizon) and the `AccompanimentNote` type charts use                                                                                                         |
+| `backing-track.ts`  | A song's recording: `loadBackingTrack()` fetches and decodes it, `createBackingTrack()` starts it in sync with the clock                                                                                  |
+| `backing-player.ts` | The recording of the chosen song, with the accompaniment's lifecycle: `load`, `play`, `pause`, `resume`, `stopAll`, `reset`                                                                               |
+| `calibration*.ts`   | Calibration statistics, and saving the offsets                                                                                                                                                            |
+| `submix.ts`         | A group of voices with its own volume: a gain into the master, rebuilt when the context is recreated                                                                                                      |
+| `game-audio.ts`     | Wires engine, pianos, accompaniment and recording together: the player's piano plays into the master, the accompaniment's own piano (same samples) and the recording through a submix; `main.ts` calls it |
+
+### The song's recording
+
+A chart can name a recording, `audio: { src, offsetMs }` (see [Charts](#format-version-1)). The game plays it as the whole production; the tiles follow the lead line and a hit plays its note on the piano over it.
+
+- **Loading.** `session.load()` fetches and decodes the recording with `loadBackingTrack()` once the chart has arrived, while the piano samples load. The session stays in `loading` (`loading.backing` is `loading`) until it has loaded or failed, so Play waits for it like it waits for the piano. A recording that fails (offline and not cached, a missing file, a file that does not decode) is logged and ignored: the song plays without it, as before, with the pianos in concert pitch. The decoded buffer is kept for the chosen song only, and reused when the same song is loaded again (a new difficulty or speed).
+- **Who plays it, and when.** `GameAudio.backing` (`backing-player.ts`) owns it next to the accompaniment and follows the same lifecycle. The session starts it with the run (`play()`, right after the song clock starts, so it begins with the lead-in), and fades it out wherever the accompaniment fades: a pause (`pause()`, 30 ms), the Classic-failure rewind (120 ms), the end of the song (800 ms), quit, restart and a calibration (150 ms). The engine events do the rest, as for the accompaniment: `interrupted` pauses it, `resumed` starts it again from the song clock (after the 3-2-1 countdown, or after "Tap to resume"), and `recreated` drops the old node and starts a new one from the kept `AudioBuffer`. `createBackingTrack()` plans every start with `planBackingStart()`: at the beginning of the file if its start is still ahead, otherwise mid-file at the position the clock will have reached, with the calibration offset A applied like for any sound.
+- **Offset.** `offsetMs` is the recording's position at chart `t = 0`; the file's first sample therefore plays at chart `t = −offsetMs` (`backingTrackStartMs()`). Not to be confused with A, the calibrated audio latency. A recording that starts before the lead-in ends is joined mid-file.
+- **Volume.** It plays through the accompaniment submix (`submix.ts`), so the accompaniment volume in Settings applies to it; there is no separate setting. Whether it needs its own is for after listening.
+- **Speed and tuning.** The recording plays at `playbackRate = tempo`, so its pitch moves with the speed (about +3.9 semitones at 1.25×). For a chart whose recording loaded, both pianos, the player's and the accompaniment's, therefore play at `playbackRate × tempo` too (`GameAudio.setTuning(tempo)`), so the notes keep their pitch relative to the recording at every speed. A sample then also lasts `1 / tempo` as long, which the envelope accounts for. A chart without a recording, or one whose recording failed, plays at concert pitch at every speed as before; the pianos go back to concert pitch when the run ends. **Open:** whether this sounds right on the iPad at 0.75× and 1.5× has not been listened to yet. If it does not, the fallback is to fix the speed at 1× for songs with a recording and say so in song select.
 
 ### Time model
 
@@ -109,7 +122,7 @@ Everything under `web/src/audio/`. The pure maths has no Web Audio imports and i
 - Pausing stores the song position; resuming re-anchors it to the current context time. A recreated context starts again at `currentTime` 0, so no context-time anchor survives a pause. Changing the tempo re-anchors so the position does not jump.
 - `engine.timeline.songTime()` is for rendering: the song time the player hears now, through the output timestamp. It never goes backwards while the clock runs.
 - `engine.timeline.judgeSongTime(event.timeStamp)` is the song time at which a tap happened. Gameplay judges hits with it, and it is the only place the input offset is applied.
-- Accompaniment, clicks and backing files start at `engine.timeline.startTimeFor(c)`: `clock.ctxTimeFor(c) − A / 1000`.
+- Accompaniment, clicks and the recording start at `engine.timeline.startTimeFor(c)`: `clock.ctxTimeFor(c) − A / 1000`.
 
 ### Latency offsets
 
@@ -125,16 +138,16 @@ The calibration (`openCalibration()` in `src/calibration/`, opened from **Calibr
 
 Subscribe with `engine.events.on(type, handler)`:
 
-| Event          | When                                                                                                    |
-| -------------- | ------------------------------------------------------------------------------------------------------- |
-| `statechange`  | The context's own state changed (`running`, `suspended`, `interrupted`, `closed`).                      |
-| `unlocked`     | Audio started for the first time.                                                                       |
-| `interrupted`  | The song clock paused and audio is fading out. Show "Tap to resume"; call `engine.resumeFromGesture()`. |
-| `needsgesture` | That tap did not bring the sound back. Ask for one more tap; it recreates the context.                  |
-| `recovered`    | Audio runs again after an interruption. The song clock is still paused until `resumed`.                 |
-| `resumed`      | The song clock continues. The accompaniment re-plans from the current song time.                        |
-| `recreated`    | A new `AudioContext` replaced a stuck one. Nodes are gone; decoded `AudioBuffer`s are reused.           |
-| `silenced`     | `engine.silence()` was called (the calibration does on open): fade out every sound and forget the song. |
+| Event          | When                                                                                                                |
+| -------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `statechange`  | The context's own state changed (`running`, `suspended`, `interrupted`, `closed`).                                  |
+| `unlocked`     | Audio started for the first time.                                                                                   |
+| `interrupted`  | The song clock paused and audio is fading out. Show "Tap to resume"; call `engine.resumeFromGesture()`.             |
+| `needsgesture` | That tap did not bring the sound back. Ask for one more tap; it recreates the context.                              |
+| `recovered`    | Audio runs again after an interruption. The song clock is still paused until `resumed`.                             |
+| `resumed`      | The song clock continues. The accompaniment and the recording re-plan from the current song time.                   |
+| `recreated`    | A new `AudioContext` replaced a stuck one. Nodes are gone; decoded `AudioBuffer`s (piano and recording) are reused. |
+| `silenced`     | `engine.silence()` was called (the calibration does on open): fade out every sound and forget the song.             |
 
 ### Unlock and interruptions
 
@@ -152,12 +165,16 @@ Subscribe with `engine.events.on(type, handler)`:
 The manifest is checked by `scripts/licenses/manifest.ts` and its tests:
 
 - **Licences:** only the names on the allowlist in `manifest.ts` pass: `Public Domain`, `CC0 1.0`, `CC BY 3.0`, `CC BY 3.0 US`, `CC BY 4.0`, `CC BY-NC 3.0`, `CC BY-NC 4.0` and `OFL-1.1`. Share-alike, no-derivatives and unknown licences fail. A Creative Commons licence or the OFL must link its own deed, and `nonCommercial` must be true exactly for the NC licences.
+- **Recordings:** every recording a chart names (`audio.src`, so `public/<src>`) must be covered by the `paths` of that song's entry, as a file or inside a listed directory; otherwise `pnpm test` fails (`recordingProblems()` in `manifest.ts`, run over every chart in `public/songs/` by `repo.test.ts`). A recording cannot ship without a credit.
 - **Consistency:** every `songs-src/<id>/` has exactly one song entry and every song entry a directory; each song's title, composer, arranger and `license` in `song.json` and in its built chart match the manifest; every listed path exists.
+
+A song entry with `"debug": true` (matching `debug` in its `song.json`) is a test song: it is shipped and licensed like any other, but the credits screen does not list it, so only a licence that needs no credit (`CC0 1.0` or `Public Domain`) passes the check.
 
 What ships:
 
 - **Piano samples:** acoustic grand piano from FluidR3_GM by Frank Wen and contributors, MP3 conversion by Benjamin Gleitzman ([gleitz/midi-js-soundfonts](https://github.com/gleitz/midi-js-soundfonts)), [CC BY 3.0 US](https://creativecommons.org/licenses/by/3.0/us/), unmodified. Full notice: [`web/public/soundfonts/fluidr3-gm/ATTRIBUTION.md`](web/public/soundfonts/fluidr3-gm/ATTRIBUTION.md).
 - **Font:** [Shantell Sans](https://github.com/arrowtype/shantell-sans) by the Shantell Sans Project Authors, [SIL Open Font License 1.1](https://openfontlicense.org/open-font-license-official-text/), from `@fontsource-variable/shantell-sans`.
+- **Test song:** `debug-backing` ("Debug: Backing Track", CC0 1.0) is the music of Billabong Morning at 120 BPM with a recording rendered by `pnpm backing-fixture`: a click on every beat over a steady D4 tone, `public/songs/debug-backing.m4a`. It only appears in song select under `?debug`, and is not in the credits screen.
 - **Songs** (each `songs-src/<id>/ATTRIBUTION.md` has the full notice):
 
   | Song                                                                 | Composer                | Source                                                                                      | Licence       |
@@ -182,17 +199,17 @@ Everything under `web/src/game/`, drawn by `web/src/scene/game-stage.ts`.
 | ------------------ | --------------------------------------------------------------------------------------------- |
 | `chart`            | a `Chart`, or the promise of one while it downloads                                           |
 | `difficulty`       | `easy`, `normal`, `hard`                                                                      |
-| `tempo`            | `0.75`, `1`, `1.25`, `1.5`: playback speed, pitch unchanged                                   |
+| `tempo`            | `0.75`, `1`, `1.25`, `1.5`: playback speed; pitch follows only for songs with a recording     |
 | `failMode`         | `classic` (first Miss or empty press ends the run) or `relaxed` (misses only break the combo) |
 | `scrollDurationMs` | real ms a tile is visible before the hit line (600–4000, default 1600), independent of tempo  |
 
 **Commands:** `start()`, `pause(reason?)`, `resume()`, `restart()`, `quit()`. A command that does not apply in the current state is ignored. Call `start`, `resume` and `restart` synchronously from a user gesture: they may unlock, recover or recreate the audio context.
 
-**Outputs:** `state` with a `statechange` event, `stats()` (score, combo, max combo, counts, accuracy, progress, stars; cheap enough to read every frame), `loading` (chart and piano-sample progress), `pauseInfo`, `countdown`, `results` and `error`, plus `judgment` events for feedback.
+**Outputs:** `state` with a `statechange` event, `stats()` (score, combo, max combo, counts, accuracy, progress, stars; cheap enough to read every frame), `loading` (chart, piano-sample and recording progress), `pauseInfo`, `countdown`, `results` and `error`, plus `judgment` events for feedback.
 
 | State       | Meaning                                                                  |
 | ----------- | ------------------------------------------------------------------------ |
-| `loading`   | Waiting for the chart and the piano samples                              |
+| `loading`   | Waiting for the chart, the piano samples and the recording, if any       |
 | `ready`     | Show the Play tile                                                       |
 | `starting`  | Start pressed; waiting for audio to run                                  |
 | `leadIn`    | The clock runs below 0 while the first tiles scroll in                   |
@@ -204,7 +221,7 @@ Everything under `web/src/game/`, drawn by `web/src/scene/game-stage.ts`.
 | `quit`      | The player quit; no results. `start()` begins a new run                  |
 | `error`     | The chart, or a piano note it plays, could not be loaded; `load()` again |
 
-Start needs every pitch the run plays: the selected difficulty's tiles plus the common and that difficulty's accompaniment. If one of them failed to download, the session stops at `error` and the Play tile offers Reload (the piano samples only load at launch). Missing notes the song never plays only bring up a notice; the song stays playable.
+Start needs every pitch the run plays: the selected difficulty's tiles plus the common and that difficulty's accompaniment. If one of them failed to download, the session stops at `error` and the Play tile offers Reload (the piano samples only load at launch). Missing notes the song never plays only bring up a notice; the song stays playable. A recording that did not load never stops a song: `loading.backing` becomes `failed` and the song plays without it.
 
 **Results** (`FinalResults`): outcome (and, for a failure, whether a missed tile or an empty tap ended it), song id and title, difficulty, tempo, fail mode, score, accuracy, max combo, Perfect/Good/Miss counts, progress, stars and the Perfect badge.
 
@@ -212,9 +229,9 @@ Start needs every pitch the run plays: the selected difficulty's tiles plus the 
 
 1. If the audio was interrupted (`pauseInfo.audio` is `interrupted`), the session recovers it with the song clock still paused: `pauseInfo.audio` goes `recovering`, then the countdown starts by itself. If it says `needsGesture`, ask for one more tap and call `resume()` again from it (that tap recreates the audio context).
 2. `countdown.beat` counts 3, 2, 1, a second each. The countdown screen must let pointer events through: pressing a lane in `countdown.heldLanes` binds that hold to the new finger or key.
-3. After 1, the song clock and the accompaniment resume together. A hold that was not reclaimed becomes a tail Miss (Classic: the run fails).
+3. After 1, the song clock, the accompaniment and the recording resume together. A hold that was not reclaimed becomes a tail Miss (Classic: the run fails).
 
-The engine side of this: `engine.resumeFromGesture({ resumeClock: false })` recovers audio and emits `recovered` without moving the song clock; `engine.resumeClock()` then resumes the clock and emits `resumed`, which restarts the accompaniment.
+The engine side of this: `engine.resumeFromGesture({ resumeClock: false })` recovers audio and emits `recovered` without moving the song clock; `engine.resumeClock()` then resumes the clock and emits `resumed`, which restarts the accompaniment and the recording.
 
 ### Rules
 
@@ -227,7 +244,7 @@ The rules live in `simulation.ts`, `judgment.ts` and `scoring.ts`: pure code wit
 - **Scoring.** Perfect 100, Good 50, Miss 0, times `min(4, 1 + floor(comboBefore / 10))`. Successful units add to the combo; a Miss resets it. Accuracy is `100 × (Perfect + Good / 2) / resolved units`, so on a failed run the units never reached do not count.
 - **Progress and stars.** Progress is `songTime / durationMs` (lead-in excluded). One star at a third, two at two thirds, three for finishing. A failed run keeps the stars it had: its `progress` is the furthest the run reached (as the HUD showed it, never less than at the Miss or empty tap that ended it), and its stars follow from that. The song finishes once time passes `durationMs` and every unit is resolved, never at the last tile. The Perfect badge needs a finished run with no Good and no Miss.
 - **Fail modes.** Classic ends the run at the first Miss or empty tap: the song falls silent, the missed tile turns red (or, for an empty tap, the pressed lane glows red at the line), the stage drifts back a little (a visual rewind only; nothing is replayed or re-judged), and the results follow. Relaxed lets misses break the combo and plays on.
-- **Sound.** A hit plays the tile's pitches at its velocity at once. A tap's note is released after 450 ms; a hold's note is released when the hold ends (the sample's natural decay is fine for long holds). The accompaniment is the chart's plus the chosen difficulty's, scheduled on the song clock, so tempo changes speed and never pitch. Melody tiles never play by themselves.
+- **Sound.** A hit plays the tile's pitches at its velocity at once. A tap's note is released after 450 ms; a hold's note is released when the hold ends (the sample's natural decay is fine for long holds). The accompaniment is the chart's plus the chosen difficulty's, scheduled on the song clock, so tempo changes speed and never pitch, except for a song with a recording (see [The song's recording](#the-songs-recording)). Melody tiles never play by themselves.
 
 ### Input
 
@@ -290,26 +307,29 @@ A chart is one JSON file per song, `web/public/songs/<id>.json`, served from `<b
 
 `pnpm charts` also writes the song catalog, `src/catalog/catalog.json`, from every chart in `public/songs/`: each song's id, title, composer, arranger, duration, BPM, and tile count and notes per second per difficulty, the gentlest song (by Normal notes per second) first. Song select reads it, so it lists the songs offline without downloading a chart; it is bundled with the app shell. Nobody edits it by hand, and a test fails when it is out of date.
 
+A chart with `"debug": true` (from `song.json`) is a test song: it is left out of `catalog.json` and listed in `src/catalog/debug-catalog.json` instead, which song select adds at the end of the list only when the page is opened with `?debug`. Players never see it. The one test song is `debug-backing`, the fixture for recording playback.
+
 The game loads one with `loadChart(url)` from `src/chart/load.ts`: it fetches the file and validates it with `parseChart()`, which throws an `Error` listing every problem. The schema (`src/chart/schema.ts`, zod/mini) and the types inferred from it (`Chart`, `Tile`, `Note`) are shared by the game and the converter.
 
 ### Format (version 1)
 
 All times are integer ms of chart time (the song at 1×), measured from `t = 0`, the first note of the song (tile or accompaniment). Velocities are MIDI velocities, integers 1 to 127.
 
-| Field           | Meaning                                                                                       |
-| --------------- | --------------------------------------------------------------------------------------------- |
-| `version`       | Always `1`.                                                                                   |
-| `id`            | Slug (`a-z`, `0-9`, `-`), the same as the file name.                                          |
-| `title`         | Song title.                                                                                   |
-| `composer`      | Who wrote the music.                                                                          |
-| `arranger`      | Who made this arrangement or edition.                                                         |
-| `bpm`           | Tempo at the start. Informational only: tempo changes are already in the ms times.            |
-| `durationMs`    | End of the last tile or note (the largest `t + dur`).                                         |
-| `leadInMs`      | How long the game waits before `t = 0`, so the first tiles can scroll in.                     |
-| `license`       | `{ source, license, licenseUrl?, author }`: where the music came from, its licence and maker. |
-| `audio`         | Optional recording: `{ src, offsetMs }`, where `offsetMs` is its position at `t = 0`.         |
-| `accompaniment` | Notes the game plays by itself on every difficulty.                                           |
-| `difficulties`  | `{ easy, normal, hard }`, each `{ tiles, accompaniment? }`.                                   |
+| Field           | Meaning                                                                                                                   |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `version`       | Always `1`.                                                                                                               |
+| `id`            | Slug (`a-z`, `0-9`, `-`), the same as the file name.                                                                      |
+| `title`         | Song title.                                                                                                               |
+| `composer`      | Who wrote the music.                                                                                                      |
+| `arranger`      | Who made this arrangement or edition.                                                                                     |
+| `bpm`           | Tempo at the start. Informational only: tempo changes are already in the ms times.                                        |
+| `durationMs`    | End of the last tile or note (the largest `t + dur`).                                                                     |
+| `leadInMs`      | How long the game waits before `t = 0`, so the first tiles can scroll in.                                                 |
+| `license`       | `{ source, license, licenseUrl?, author }`: where the music came from, its licence and maker.                             |
+| `audio`         | Optional recording: `{ src, offsetMs }`, `src` under the app base (`songs/<id>.m4a`), `offsetMs` its position at `t = 0`. |
+| `debug`         | Optional `true` for a test song: in the debug catalog only, not song select (see above).                                  |
+| `accompaniment` | Notes the game plays by itself on every difficulty.                                                                       |
+| `difficulties`  | `{ easy, normal, hard }`, each `{ tiles, accompaniment? }`.                                                               |
 
 - **Tile** `{ t, lane, dur?, pitches, vel }`: `lane` is 0 (left) to 3 (right). A tile with `dur` is a hold. `pitches` are the notes the tile plays when hit (at least one); the converter always writes one. Two tiles with the same `t` are a double.
 - **Note** `{ t, pitch, dur, vel }`: the same shape as the audio engine's `AccompanimentNote`, so the scheduler plays chart notes directly. A type test fails if the two drift apart.
@@ -361,7 +381,8 @@ andre-sonatine: andre-sonatine.mid → public/songs/andre-sonatine.json (95.8 s)
    | ------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
    | `midi`              | the only `.mid` file           | MIDI file name in the directory                                                                                                                         |
    | `leadInMs`          | `2000`                         | Wait before `t = 0`                                                                                                                                     |
-   | `audio`             | none                           | `{ src, offsetMs = 0 }`: a recording to play in sync                                                                                                    |
+   | `audio`             | none                           | `{ src, offsetMs = 0 }`: a recording to play in sync (see "A recording" below)                                                                          |
+   | `debug`             | `false`                        | A test song: in the debug catalog (`?debug`) only, never in song select for players                                                                     |
    | `melody`            | first track with notes         | `track` (index), `trackName`, `channel` (0-based): a track matching all given is melody. `splitPitch`: only its notes at or above this pitch are melody |
    | `includePercussion` | `false`                        | Keep drum tracks in the accompaniment                                                                                                                   |
    | `quantize`          | `{ grid: 4, tolerance: 0.25 }` | Grid steps per quarter note, and how close (fraction of a step) an onset must be to snap                                                                |
@@ -370,8 +391,9 @@ andre-sonatine: andre-sonatine.mid → public/songs/andre-sonatine.json (95.8 s)
 
    Unknown fields are errors, so a typo does not go unnoticed. Run `pnpm charts <id>` once: it lists the file's tracks (index, name, channel, notes) so you can pick the melody, also when the selection matches nothing.
 
-4. **Build:** `pnpm charts` rebuilds every song (`pnpm charts <id>` only that one). Check the notes per second it prints: each difficulty should be clearly easier than the next. Tune `difficulties` in `song.json` if not.
-5. **Credit it:** add a song entry to `assets/LICENSES.json` (the same title, composer, arranger and `license` fields as `song.json`, plus `modifications`, `retrieved`, `nonCommercial` and `paths`), run `pnpm credits`, and add the song to the table in [Credits](#credits). Commit the source directory, `public/songs/<id>.json`, `src/catalog/catalog.json`, the manifest and `src/credits/credits.json` together. `pnpm test` fails if the manifest and the song disagree.
+4. **Add a recording (optional).** For a song whose music is a recording, with the MIDI charting its lead line: put the file at `web/public/songs/<id>.m4a` (served from `<base>songs/<id>.m4a`) and set `"audio": { "src": "songs/<id>.m4a", "offsetMs": 0 }` in `song.json`. `src` is relative to the app base, like the chart (`songs/<id>.json`). `offsetMs` is where the recording is at chart `t = 0`, the first note of the MIDI: if the recording's first note sounds 480 ms into the file, set `480`; the game starts the file that much early, during the lead-in (a negative value starts it later). The MIDI and the recording must be at the same tempo: the game keeps them together only through that one offset. Formats: **AAC (`.m4a`) or MP3**. Safari's `decodeAudioData` handles both; Ogg Vorbis is unreliable on iOS, so do not use it. Encoders add a little silence at the start (AAC about 23 ms, MP3 about 25 ms); a decoder that honours the file's gapless information drops it, so check it by ear with the debug sync test's beat dot, and put what is left in `offsetMs`. The decoded recording stays in memory while the song is chosen (a 3-minute stereo file at 44.1 kHz takes about 63 MB), so keep songs to a few minutes. The game never streams it: it is fetched whole, so the service worker caches it for offline play (see [Offline and caching](#offline-and-caching)). The recording is part of the song's credit: list `public/songs/<id>.m4a` in the `paths` of its manifest entry (step 6), or `pnpm test` fails (see [Credits](#credits)).
+5. **Build:** `pnpm charts` rebuilds every song (`pnpm charts <id>` only that one). Check the notes per second it prints: each difficulty should be clearly easier than the next. Tune `difficulties` in `song.json` if not.
+6. **Credit it:** add a song entry to `assets/LICENSES.json` (the same title, composer, arranger and `license` fields as `song.json`, plus `modifications`, `retrieved`, `nonCommercial` and `paths`, which lists the source directory, the chart and any recording), run `pnpm credits`, and add the song to the table in [Credits](#credits). Commit the source directory, `public/songs/<id>.json`, the recording, `src/catalog/catalog.json`, the manifest and `src/credits/credits.json` together. `pnpm test` fails if the manifest and the song disagree.
 
 ### The song generator
 
@@ -388,6 +410,12 @@ andre-sonatine: andre-sonatine.mid → public/songs/andre-sonatine.json (95.8 s)
 The pure logic is in `scripts/songgen/`: `composeSong()` picks a common chord progression for each phrase letter, puts chord tones on beats 1 and 3 with scale steps in between, ends A phrases with a V–I cadence and B phrases on V, and closes the piece on a whole-note tonic chord. The left hand plays the chords as root, fifth, tenth, fifth on its own track. `generateSongMidi()` writes the MIDI with `@tonejs/midi`.
 
 To make a new one: create `songs-src/<id>/generate.json`, run `pnpm generate-song <id>`, try seeds until it sounds good and charts well, then add `song.json` (with `"melody": { "trackName": "melody" }`), `ATTRIBUTION.md` and a manifest entry as for any other song. Generated songs are CC0 1.0.
+
+### The test recording
+
+`songs-src/debug-backing/` is a copy of Billabong Morning's music at 120 BPM (the generator's seed 95, `generate.json`) with `"debug": true` and an `audio` recording, `public/songs/debug-backing.m4a`. It exists so recording playback can be tested without a real recorded song: open the app with `?debug` and it is the last song in song select, a normal playable chart with the full run lifecycle (lead-in, pause and countdown, "Tap to resume", Classic failure, restart, quit). The debug panel's sync test can also play the file alone (**Recording file (m4a)**), in step with its beat dot.
+
+`pnpm backing-fixture` (`scripts/generate-backing-fixture.ts`, needs `ffmpeg`) writes the file from the chart's BPM and duration: a short click on every beat, higher and louder on the downbeat, over a steady D4 tone, the song's key, as mono AAC at 32 kbit/s (about 260 KB, the same bytes every run). The clicks make drift audible against the tiles and the piano; the tone makes tuning audible, because a note you hit should sit in tune with it at every speed. Re-run `pnpm generate-song debug-backing`, `pnpm charts` and `pnpm backing-fixture` together if the song's parameters change.
 
 ## Testing on an iPad
 
@@ -430,3 +458,5 @@ Use the Home Screen app opened with `?debug`. The **Audio** section of the debug
 3. **3-minute sync.** Start the sync test at 1× (120 BPM piano metronome and chords for 3 minutes). The dot should flash exactly with each click to the end, `skipped late` should stay at 0, and `clock drift` and `output lag` should stay roughly constant. Repeat at 0.75× and 1.5×.
 4. **Tap-to-sound latency.** Use the built-in speakers at full volume. Film the iPad from the side in slow motion (240 fps) while tapping the **Tap pad** with a fingernail, so the tap is audible. Step through the video: the latency is the time from the fingertip touching the glass to the start of the piano note in the audio track (count frames, about 4.2 ms each at 240 fps). Take the median of 10 taps and record it on PLA-3.
 5. **Calibration persistence.** Tap **Calibrate** (or **Calibrate timing** in Settings), complete both rounds and **Save**. Force-quit the app and relaunch it: the panel's **Calibration** line still shows the saved values.
+6. **A song's recording (open: not listened to yet).** Open the app with `?debug`, pick **Debug: Backing Track** (last in the list) on Easy and play it. The clicks should land exactly on the beat (the tiles' rhythm) from the first one to the last. Then check each of these keeps them together, by ear: **Pause**, then **Resume** after the 3-2-1; switch to another app and back, then tap to resume; **Simulate stuck pause** and the taps it asks for (the context is recreated, and the recording must come back in sync). Fail on purpose (Classic) and **Retry**, **Quit** to the song list, and finish a song: nothing may keep sounding on another screen. Turn Accompaniment down in Settings: the recording follows it. Then the speed: play it at 0.75× and 1.5× and listen to whether the piano notes you hit stay in tune with the steady D4 tone (they should: both are raised or lowered together, and so is the accompaniment). Record the iPad, iPadOS and Safari versions, and the verdict on PLA-11: if the tuning sounds bad, the fallback is to fix the speed at 1× for songs with a recording.
+7. **Recording offline.** With the debug song played once online, force-quit, turn on Airplane Mode and play it again: the recording should still play.

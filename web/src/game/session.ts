@@ -1,5 +1,6 @@
 import { createEventBus } from '../app/events';
 import type { Lifecycle } from '../app/lifecycle';
+import type { BackingPlayer } from '../audio/backing-player';
 import type { AudioEngine } from '../audio/engine';
 import type { LoadProgress, PianoSamples } from '../audio/piano-samples';
 import type { PianoVoice, Sampler } from '../audio/sampler';
@@ -52,6 +53,10 @@ export interface SessionAudio {
   >;
   piano: Pick<Sampler, 'noteOn' | 'noteOff' | 'stopAll'>;
   accompaniment: Pick<Accompaniment, 'play' | 'pause' | 'stopAll'>;
+  /** The song's recording, loaded with the song (`chart.audio`). */
+  backing: Pick<BackingPlayer, 'load' | 'state' | 'play' | 'pause' | 'stopAll'>;
+  /** Tunes both pianos to a recording at this speed; 1 is concert pitch. */
+  setTuning(rate: number): void;
   samples: {
     readonly progress: LoadProgress;
     readonly ready: Promise<Pick<PianoSamples, 'failed'>>;
@@ -109,7 +114,7 @@ export function createGameplaySession({
   bus,
   now = () => performance.now(),
 }: GameplaySessionOptions): GameplaySession {
-  const { engine, piano, accompaniment, samples } = audio;
+  const { engine, piano, accompaniment, backing, samples } = audio;
   const events = createEventBus<SessionEvents>();
 
   let state: SessionState = 'loading';
@@ -222,7 +227,10 @@ export function createGameplaySession({
 
   const silence = (fadeMs: number) => {
     accompaniment.stopAll(fadeMs);
+    backing.stopAll(fadeMs);
     piano.stopAll(fadeMs);
+    // Notes struck outside a run (the ?debug tap pad) are in concert pitch.
+    audio.setTuning(1);
     holdVoices.clear();
   };
 
@@ -271,12 +279,16 @@ export function createGameplaySession({
     const { chart, difficulty, tempo } = config;
     // Quiet anything left over (another run's tail, the debug sync test).
     silence(0);
+    // Both pianos follow a recording's pitch as the speed changes: when there is one
+    // to be in tune with (it may have failed to load, then the notes keep concert pitch).
+    audio.setTuning(backing.state === 'loaded' ? tempo : 1);
     engine.clock.setTempo(tempo);
     engine.clock.start(-chart.leadInMs);
     accompaniment.play([
       ...chart.accompaniment,
       ...(chart.difficulties[difficulty].accompaniment ?? []),
     ]);
+    backing.play();
     setState('leadIn');
   };
 
@@ -335,6 +347,7 @@ export function createGameplaySession({
     }
     // Two pianos: pausing the accompaniment leaves the player's notes to fade here.
     accompaniment.pause(PAUSE_FADE_MS);
+    backing.pause(PAUSE_FADE_MS);
     piano.stopAll(PAUSE_FADE_MS);
     holdVoices.clear();
     sim.pause();
@@ -478,7 +491,11 @@ export function createGameplaySession({
     },
     get loading(): LoadingInfo {
       const { loaded, failed, total } = samples.progress;
-      return { chartLoaded, samples: { loaded, failed, total } };
+      return {
+        chartLoaded,
+        samples: { loaded, failed, total },
+        backing: chartLoaded ? backing.state : 'none',
+      };
     },
     get pauseInfo() {
       return pauseInfo;
@@ -530,7 +547,12 @@ export function createGameplaySession({
         if (token === loadToken) chartLoaded = true;
         return loaded;
       });
-      Promise.all([chartReady, samples.ready]).then(
+      // The recording downloads with the piano; it never fails the load. A superseded
+      // load stays away from it: the newer load's recording may already be playing.
+      const backingReady = chartReady.then((loaded) =>
+        token === loadToken ? backing.load(loaded.audio) : undefined,
+      );
+      Promise.all([chartReady, samples.ready, backingReady]).then(
         ([loaded, { failed }]) => {
           if (token !== loadToken) return;
           const needed = requiredPitches(loaded, rest.difficulty);

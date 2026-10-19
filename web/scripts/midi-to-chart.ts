@@ -3,11 +3,12 @@
 // Each songs-src/<id>/ holds a MIDI file and a song.json (see README, "Adding a song").
 // A chart is validated before it is written; any failure exits non-zero. Then the song
 // catalog, src/catalog/catalog.json, is rebuilt from every chart in public/songs/ (also
-// after `pnpm charts <id>`); a test fails while it is out of date.
+// after `pnpm charts <id>`), and the debug catalog, src/catalog/debug-catalog.json, from
+// its `debug` charts; a test fails while either is out of date.
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { DIFFICULTIES, parseChart } from '../src/chart/schema.ts';
-import { buildCatalog, formatCatalog } from './charts/catalog.ts';
+import { buildCatalog, buildDebugCatalog, formatCatalog } from './charts/catalog.ts';
 import { parseSongConfig } from './charts/config.ts';
 import { convertMidi } from './charts/convert.ts';
 import { formatJson } from './charts/serialize.ts';
@@ -15,6 +16,7 @@ import { formatJson } from './charts/serialize.ts';
 const SOURCES = fileURLToPath(new URL('../songs-src/', import.meta.url));
 const OUT = fileURLToPath(new URL('../public/songs/', import.meta.url));
 const CATALOG = fileURLToPath(new URL('../src/catalog/catalog.json', import.meta.url));
+const DEBUG_CATALOG = fileURLToPath(new URL('../src/catalog/debug-catalog.json', import.meta.url));
 
 async function buildSong(id: string): Promise<void> {
   const dir = `${SOURCES}${id}/`;
@@ -48,6 +50,9 @@ async function writeCatalog(): Promise<void> {
   const catalog = buildCatalog(charts);
   await writeFile(CATALOG, formatCatalog(catalog));
   console.log(`public/songs/ → src/catalog/catalog.json (${catalog.songs.length} songs)`);
+  const debug = buildDebugCatalog(charts);
+  await writeFile(DEBUG_CATALOG, formatCatalog(debug));
+  console.log(`public/songs/ → src/catalog/debug-catalog.json (${debug.songs.length} debug songs)`);
 }
 
 async function findMidi(dir: string): Promise<string> {
