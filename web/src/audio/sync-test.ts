@@ -5,7 +5,10 @@ import type { AccompanimentNote } from './scheduler';
 /**
  * The ?debug 3-minute sync test: generated accompaniment through the real
  * scheduler and song clock, so audible sync can be judged against a beat
- * indicator drawn from `songTime()`.
+ * indicator drawn from `songTime()`. Its third source plays the recorded fixture
+ * (`public/songs/debug-backing.m4a`: a click per beat at the same 120 BPM over a D4
+ * tone), fetched and decoded as a song's recording is, so the real file path can be
+ * checked by ear too.
  */
 export const SYNC_TEST_BPM = 120;
 export const SYNC_TEST_MS = 180_000;
@@ -58,7 +61,8 @@ export function renderBackingTicks(
   return buffer;
 }
 
-export type SyncSource = 'piano' | 'backing';
+/** `piano`: the scheduler; `backing`: a generated tick buffer; `file`: the decoded fixture file. */
+export type SyncSource = 'piano' | 'backing' | 'file';
 
 export interface SyncTestReadout {
   running: boolean;
@@ -74,6 +78,8 @@ export interface SyncTestReadout {
   scheduled: number;
   skipped: number;
   lastLeadMs: number;
+  /** The `file` source is downloading, or did not load. */
+  file: 'idle' | 'loading' | 'failed';
 }
 
 export interface SyncTest {
@@ -82,13 +88,27 @@ export interface SyncTest {
   readout(): SyncTestReadout;
 }
 
-export function createSyncTest(audio: GameAudio, nowMs = () => performance.now()): SyncTest {
+export interface SyncTestOptions {
+  nowMs?: () => number;
+  /** Fetches and decodes the fixture file for the `file` source; null when it failed. */
+  loadFile?: () => Promise<AudioBuffer | null>;
+}
+
+export function createSyncTest(
+  audio: GameAudio,
+  { nowMs = () => performance.now(), loadFile = () => Promise.resolve(null) }: SyncTestOptions = {},
+): SyncTest {
   const { engine, accompaniment } = audio;
   const beatMs = 60_000 / SYNC_TEST_BPM;
   let running = false;
   let source: SyncSource = 'piano';
   let durationMs = SYNC_TEST_MS;
   let backing: BackingTrack | undefined;
+  let fileBuffer: AudioBuffer | undefined;
+  let file: SyncTestReadout['file'] = 'idle';
+  // Bumped by every start and stop, to drop a file download that was overtaken.
+  let startToken = 0;
+  let tuned = false;
   let anchor = { ctx: 0, perf: 0 };
   // Held while paused: a suspended context clock stands still.
   let clockDriftMs = 0;
@@ -107,7 +127,11 @@ export function createSyncTest(audio: GameAudio, nowMs = () => performance.now()
   });
 
   const stop = (fadeMs = 150) => {
+    startToken += 1;
+    if (file === 'loading') file = 'idle';
     running = false;
+    if (tuned) audio.setTuning(1);
+    tuned = false;
     accompaniment.stopAll(fadeMs);
     backing?.stop(fadeMs);
     backing = undefined;
@@ -115,30 +139,60 @@ export function createSyncTest(audio: GameAudio, nowMs = () => performance.now()
   };
   // The calibration needs quiet: end the test, so the debug panel shows it stopped.
   engine.events.on('silenced', ({ fadeMs }) => {
-    if (running) stop(fadeMs);
+    if (running || file === 'loading') stop(fadeMs);
   });
+
+  const begin = (
+    options: { tempo: number; source: SyncSource },
+    buffer: AudioBuffer | undefined,
+  ) => {
+    source = options.source;
+    durationMs =
+      source === 'piano' ? SYNC_TEST_MS : buffer ? buffer.duration * 1000 : SYNC_BACKING_MS;
+    engine.clock.setTempo(options.tempo);
+    engine.clock.start(-LEAD_IN_MS);
+    reanchor();
+    clockDriftMs = 0;
+    running = true;
+    if (source === 'piano') {
+      accompaniment.play(syncTestNotes());
+    } else {
+      // Like a song's recording, the file's pitch follows the speed; so does the tap
+      // pad's piano, which keeps it in tune with the tone.
+      if (source === 'file') {
+        audio.setTuning(options.tempo);
+        tuned = true;
+      }
+      backing = createBackingTrack({
+        target: engine,
+        clock: engine.clock,
+        audioOffsetMs: () => engine.offsets.audioOffsetMs,
+        buffer: buffer ?? renderBackingTicks(engine.context),
+      });
+      backing.play();
+    }
+  };
 
   return {
     start(options) {
       stop();
-      source = options.source;
-      durationMs = source === 'piano' ? SYNC_TEST_MS : SYNC_BACKING_MS;
-      engine.clock.setTempo(options.tempo);
-      engine.clock.start(-LEAD_IN_MS);
-      reanchor();
-      clockDriftMs = 0;
-      running = true;
-      if (source === 'piano') {
-        accompaniment.play(syncTestNotes());
-      } else {
-        backing = createBackingTrack({
-          target: engine,
-          clock: engine.clock,
-          audioOffsetMs: () => engine.offsets.audioOffsetMs,
-          buffer: renderBackingTicks(engine.context),
-        });
-        backing.play();
+      if (options.source !== 'file') {
+        begin(options, undefined);
+        return;
       }
+      const token = startToken;
+      source = 'file';
+      file = fileBuffer ? 'idle' : 'loading';
+      void (fileBuffer ? Promise.resolve(fileBuffer) : loadFile()).then((buffer) => {
+        if (token !== startToken) return;
+        if (!buffer) {
+          file = 'failed';
+          return;
+        }
+        fileBuffer = buffer;
+        file = 'idle';
+        begin(options, buffer);
+      });
     },
     stop() {
       stop();
@@ -164,6 +218,7 @@ export function createSyncTest(audio: GameAudio, nowMs = () => performance.now()
         scheduled: stats.scheduled,
         skipped: stats.skipped,
         lastLeadMs: stats.lastLeadMs,
+        file,
       };
     },
   };

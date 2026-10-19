@@ -1,3 +1,4 @@
+import { loadBackingTrack } from '../audio/backing-track';
 import type { GameAudio } from '../audio/game-audio';
 import { createSyncTest, type SyncSource } from '../audio/sync-test';
 
@@ -15,6 +16,8 @@ const TEMPOS = [0.75, 1, 1.25, 1.5] as const;
 /** C5: a bright attack, easy to spot in a recording. */
 const PAD_PITCH = 72;
 const BEAT_FLASH_MS = 90;
+/** The debug song's recording, which the sync test's `file` source plays. */
+const SYNC_FILE = 'songs/debug-backing.m4a';
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -69,7 +72,14 @@ export function createAudioDebugSection({
   openCalibration,
 }: AudioDebugOptions): HTMLElement {
   const { engine, piano, accompaniment, samples } = audio;
-  const sync = createSyncTest(audio);
+  const sync = createSyncTest(audio, {
+    loadFile: () =>
+      loadBackingTrack({
+        url: SYNC_FILE,
+        base: import.meta.env.BASE_URL,
+        decode: (data) => engine.context.decodeAudioData(data),
+      }),
+  });
 
   const section = el('details', 'debug-section');
   section.open = true;
@@ -146,7 +156,8 @@ export function createAudioDebugSection({
       'Sound source',
       [
         { value: 'piano' as const, text: 'Piano, 3 min' },
-        { value: 'backing' as const, text: 'Backing file, 1 min' },
+        { value: 'backing' as const, text: 'Ticks buffer, 1 min' },
+        { value: 'file' as const, text: 'Recording file (m4a)' },
       ],
       source,
       (value) => {
@@ -165,7 +176,11 @@ export function createAudioDebugSection({
     const index = Math.floor(r.songMs / r.beatMs);
     const lit = r.running && r.songMs >= 0 && r.songMs - index * r.beatMs < BEAT_FLASH_MS;
     beat.dataset.lit = lit ? (index % 4 === 0 ? 'down' : 'beat') : 'off';
-    if (r.running) {
+    if (r.file === 'loading') {
+      syncReadout.textContent = 'Loading the recording file…';
+    } else if (r.file === 'failed') {
+      syncReadout.textContent = `The recording file (${SYNC_FILE}) did not load; see the console.`;
+    } else if (r.running) {
       syncReadout.textContent = [
         `${clockText(r.songMs)} of ${clockText(r.durationMs)} at ${r.tempo}×, ${r.source}`,
         `Output lag ${r.outputLagMs.toFixed(1)} ms, clock drift ${r.clockDriftMs.toFixed(1)} ms`,

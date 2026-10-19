@@ -147,8 +147,13 @@ export const ChartSchema = z.object({
     /** Who made the source (typesetter, sequencer). */
     author: z.string(),
   }),
-  /** An optional recording played in sync; `offsetMs` is its position at t = 0. */
+  /**
+   * An optional recording played in sync: `src` is under the app base, `offsetMs` is
+   * its position at t = 0.
+   */
   audio: z.optional(z.object({ src: z.string(), offsetMs: z.int() })),
+  /** A test song: listed by the debug catalog (`?debug`) only, never in song select. */
+  debug: z.optional(z.boolean()),
   /** Auto-played on every difficulty. */
   accompaniment: z.array(NoteSchema),
   difficulties: z.object({

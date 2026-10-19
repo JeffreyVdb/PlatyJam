@@ -76,7 +76,13 @@ export const SongConfigSchema = z.strictObject({
   /** The MIDI file in the song directory. Default: the only `.mid`/`.midi` file there. */
   midi: z.string().optional(),
   leadInMs: z.int().min(0).default(2000),
+  /**
+   * A recording to play with the song: `src` is under the app base (the file lives in
+   * `public/`, e.g. `songs/<id>.m4a`), `offsetMs` is its position at chart t = 0.
+   */
   audio: z.strictObject({ src: z.string().min(1), offsetMs: z.int().default(0) }).optional(),
+  /** A test song: in the debug catalog (`?debug`), never in song select for players. */
+  debug: z.boolean().optional(),
   /**
    * Which notes become tiles. A track is a melody track when it matches every
    * selector given (index in the file, name, 0-based channel); with none, the first

@@ -94,6 +94,8 @@ export const EntrySchema = z
       ...common,
       composer: z.string().min(1),
       arranger: z.string().min(1),
+      /** A test song (`debug` in its `song.json`): shipped, but not named in the credits. */
+      debug: z.boolean().optional(),
     }),
     z.strictObject({ kind: z.literal('sample'), ...common }),
     z.strictObject({ kind: z.literal('font'), ...common }),
@@ -152,4 +154,50 @@ export function parseManifest(json: unknown): Manifest {
   const result = ManifestSchema.safeParse(json);
   if (!result.success) throw new Error(z.prettifyError(result.error));
   return result.data;
+}
+
+/** What the recording check needs of a chart. */
+export interface RecordingChart {
+  id: string;
+  audio?: { src: string } | undefined;
+}
+
+/** True when `path` (a file, or a directory ending in `/`) covers `file`. */
+const covers = (path: string, file: string) =>
+  path === file || (path.endsWith('/') && file.startsWith(path));
+
+/**
+ * The file in `web/` a chart's `audio.src` names: `src` is under the app base, which
+ * is `public/` (`songs/a.m4a` is `public/songs/a.m4a`). Null for a URL with a scheme,
+ * which is not a file we ship.
+ */
+export function recordingFile(src: string): string | null {
+  if (/^[a-z][a-z\d+.-]*:/i.test(src)) return null;
+  return `public/${src.replace(/^\/+/, '')}`;
+}
+
+/**
+ * Every recording a chart names that its song's manifest entry does not cover in
+ * `paths`, so that a recording cannot ship without its credit. One message per
+ * problem; empty when every recording is listed.
+ */
+export function recordingProblems(manifest: Manifest, charts: readonly RecordingChart[]): string[] {
+  const problems: string[] = [];
+  for (const { id, audio } of charts) {
+    if (!audio) continue;
+    const entry = manifest.entries.find((e) => e.kind === 'song' && e.id === id);
+    const file = recordingFile(audio.src);
+    if (file === null) {
+      problems.push(`${id}: audio.src "${audio.src}" is not a file under public/`);
+    } else if (!entry) {
+      problems.push(
+        `${id}: chart names the recording ${file} but has no song entry in the manifest`,
+      );
+    } else if (!entry.paths.some((path) => covers(path, file))) {
+      problems.push(
+        `${id}: the recording ${file} is not listed in the paths of its manifest entry`,
+      );
+    }
+  }
+  return problems;
 }

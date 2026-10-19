@@ -54,6 +54,16 @@ describe('buildCredits', () => {
     ]);
   });
 
+  it('leaves test songs out: they are not shown to players', () => {
+    const song = fixture.entries.find((entry) => entry.id === 'zebra-song');
+    if (song?.kind !== 'song') throw new Error('fixture');
+    const manifest = parseManifest({
+      entries: [song, { ...song, id: 'debug-song', title: 'Debug', debug: true }],
+    });
+    const [songs] = buildCredits(manifest).sections;
+    expect(songs?.items.map((item) => item.id)).toEqual(['zebra-song']);
+  });
+
   it('writes display-ready fields, with a note only for non-commercial licences', () => {
     const [songs] = buildCredits(fixture).sections;
     expect(songs?.title).toBe('Songs');

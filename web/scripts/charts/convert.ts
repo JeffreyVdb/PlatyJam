@@ -98,6 +98,7 @@ export function convertMidi(
       author: license.author,
     },
     audio: config.audio && { src: config.audio.src, offsetMs: config.audio.offsetMs },
+    ...(config.debug ? { debug: true } : {}),
     accompaniment: topNotes,
     difficulties,
   } satisfies Chart);

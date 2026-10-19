@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { parseChart } from '../../src/chart/schema.ts';
 import { parseSongConfig } from '../charts/config.ts';
-import { parseManifest, type SongEntry } from './manifest.ts';
+import { parseManifest, recordingFile, recordingProblems, type SongEntry } from './manifest.ts';
 
 const WEB = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -51,6 +51,7 @@ describe('assets/LICENSES.json', () => {
         arranger: entry.arranger,
         license: licenseOf(entry),
       });
+      expect(config.debug === true, `${entry.id}: debug`).toBe(entry.debug === true);
     }
   });
 
@@ -73,6 +74,20 @@ describe('assets/LICENSES.json', () => {
       expect(entry.paths, entry.id).toEqual(
         expect.arrayContaining([`songs-src/${entry.id}/`, `public/songs/${entry.id}.json`]),
       );
+    }
+  });
+
+  it('lists every recording a chart names, in the paths of its song', async () => {
+    const files = (await readdir(`${WEB}public/songs/`)).filter((name) => name.endsWith('.json'));
+    const charts = await Promise.all(
+      files.map(async (name) =>
+        parseChart(JSON.parse(await readFile(`${WEB}public/songs/${name}`, 'utf8'))),
+      ),
+    );
+    expect(recordingProblems(manifest, charts)).toEqual([]);
+    for (const { id, audio } of charts) {
+      const file = audio && recordingFile(audio.src);
+      if (file) await expect(access(`${WEB}${file}`), `${id}: ${file}`).resolves.toBeUndefined();
     }
   });
 
