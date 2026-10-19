@@ -333,7 +333,9 @@ export function createGameplaySession({
       afterSimulation();
       if (sim.status !== 'running') return;
     }
+    // Two pianos: pausing the accompaniment leaves the player's notes to fade here.
     accompaniment.pause(PAUSE_FADE_MS);
+    piano.stopAll(PAUSE_FADE_MS);
     holdVoices.clear();
     sim.pause();
     input?.clear();
