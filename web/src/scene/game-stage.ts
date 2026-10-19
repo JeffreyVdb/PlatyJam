@@ -328,6 +328,7 @@ export function createGameStage({
     glowGeometry.translate(0, 0.002, 0.15 - glowLength / 2);
     const glowMaterial = new MeshBasicMaterial({ map: glowTexture, ...additive });
     const glows = new InstancedMesh(glowGeometry, glowMaterial, LANES);
+    glows.name = 'lane-glows';
     for (let lane = 0; lane < LANES; lane += 1) {
       dummy.position.set(laneX(lane), 0, 0);
       dummy.scale.set(1, 1, 1);
@@ -372,6 +373,7 @@ export function createGameStage({
     tileGeometry.translate(0, 0.01, 0);
     const tileMaterial = new MeshBasicMaterial();
     const tiles = dynamicMesh(tileGeometry, tileMaterial, MAX_TILES, root);
+    tiles.name = 'tiles';
 
     const flashGeometry = new ShapeGeometry(roundedTileShape(tileWidth, tileLength), 6);
     flashGeometry.rotateX(-Math.PI / 2);
@@ -731,9 +733,16 @@ export function createGameStage({
 
     onJudgment(event) {
       if (event.judgment === 'miss') {
+        // The red follows the latest miss. The clock only moves in `render`, so
+        // misses from one update (a chord expiring together) share it and all stay lit.
+        for (let lane = 0; lane < LANES; lane += 1) {
+          if (laneSnag[lane] !== clock) laneSnag[lane] = -Infinity;
+        }
         laneSnag[event.lane] = clock;
         return;
       }
+      // A hit shows at once, not behind that lane's earlier miss.
+      laneSnag[event.lane] = -Infinity;
       // A completed hold tail is a quieter moment than a strike.
       const strike = event.unit !== 'tail';
       const perfect = event.judgment === 'perfect';
