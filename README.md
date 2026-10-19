@@ -164,6 +164,52 @@ What ships:
   | Für Elise, WoO 59 (`beethoven-fur-elise`)                            | L. van Beethoven        | [Mutopia 931](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=931), Stelios Samelis | Public domain |
   | Sonata No. 8 "Pathétique", III. Rondo (`beethoven-pathetique-rondo`) | L. van Beethoven        | [Mutopia 296](https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=296), Chris Sawer     | Public domain |
 
+## Gameplay
+
+Everything under `web/src/game/`.
+
+### The session contract (PLA-6 ↔ PLA-7)
+
+`src/game/session-contract.ts` is the boundary between gameplay and the screens around it. Gameplay (PLA-6) owns the simulation, input, rendering, judgment, scoring, the session controls and the HUD pause button. The menus, pause, countdown and results screens, persisted settings and best scores (PLA-7) drive a `GameSession` only through its commands and outputs.
+
+**Inputs** (`SessionSetup`, passed to `load()`):
+
+| Field              | Values                                                                                        |
+| ------------------ | --------------------------------------------------------------------------------------------- |
+| `chart`            | a `Chart`, or the promise of one while it downloads                                           |
+| `difficulty`       | `easy`, `normal`, `hard`                                                                      |
+| `tempo`            | `0.75`, `1`, `1.25`, `1.5`: playback speed, pitch unchanged                                   |
+| `failMode`         | `classic` (first Miss or empty press ends the run) or `relaxed` (misses only break the combo) |
+| `scrollDurationMs` | real ms a tile is visible before the hit line (600–4000, default 1600), independent of tempo  |
+
+**Commands:** `start()`, `pause(reason?)`, `resume()`, `restart()`, `quit()`. A command that does not apply in the current state is ignored. Call `start`, `resume` and `restart` synchronously from a user gesture: they may unlock, recover or recreate the audio context.
+
+**Outputs:** `state` with a `statechange` event, `stats()` (score, combo, max combo, counts, accuracy, progress, stars; cheap enough to read every frame), `loading` (chart and piano-sample progress), `pauseInfo`, `countdown`, `results` and `error`, plus `judgment` events for feedback.
+
+| State       | Meaning                                                                 |
+| ----------- | ----------------------------------------------------------------------- |
+| `loading`   | Waiting for the chart and the piano samples                             |
+| `ready`     | Show the Start tile                                                     |
+| `starting`  | Start pressed; waiting for audio to run                                 |
+| `leadIn`    | The clock runs below 0 while the first tiles scroll in                  |
+| `playing`   | The song plays                                                          |
+| `paused`    | Song and judgment frozen, sound faded out, hold progress kept           |
+| `countdown` | 3-2-1; lane presses only reclaim interrupted holds                      |
+| `failing`   | Classic failure: the stage shows a short visual rewind, then `finished` |
+| `finished`  | `results` is set (`outcome`: `cleared` or `failed`)                     |
+| `quit`      | The player quit; no results. `start()` begins a new run                 |
+| `error`     | The chart could not be loaded                                           |
+
+**Results** (`FinalResults`): outcome (and, for a failure, whether a missed tile or an empty tap ended it), song id and title, difficulty, tempo, fail mode, score, accuracy, max combo, Perfect/Good/Miss counts, progress, stars and the Perfect badge.
+
+**Pause, audio recovery and the countdown.** Pausing (the HUD button, backgrounding, an audio interruption, a cancelled touch, the window losing focus) freezes the song clock and judgment, fades out all sound, keeps the progress of held tiles and forgets which finger or key held them; `pauseInfo.heldLanes` lists those lanes. The pause screen calls `resume()` from a tap:
+
+1. If the audio was interrupted, the session recovers it with the song clock still paused: `pauseInfo.audio` goes `recovering`, then the countdown starts by itself. If it says `needsGesture`, ask for one more tap and call `resume()` again from it (that tap recreates the audio context).
+2. `countdown.beat` counts 3, 2, 1, a second each. The countdown screen must let pointer events through: pressing a lane in `countdown.heldLanes` binds that hold to the new finger or key.
+3. After 1, the song clock and the accompaniment resume together. A hold that was not reclaimed becomes a tail Miss (Classic: the run fails).
+
+The engine side of this: `engine.resumeFromGesture({ resumeClock: false })` recovers audio and emits `recovered` without moving the song clock; `engine.resumeClock()` then resumes the clock and emits `resumed`, which restarts the accompaniment.
+
 ## Charts
 
 A chart is one JSON file per song, `web/public/songs/<id>.json`, served from `<base>songs/<id>.json` and cached at runtime like other songs. `pnpm charts` generates them from MIDI files; nobody edits them by hand.
