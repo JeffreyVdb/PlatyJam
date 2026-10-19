@@ -154,7 +154,7 @@ export interface ScoreStats {
 export interface LiveStats extends ScoreStats {
   /** `clamp(songTime / durationMs, 0, 1)`; lead-in excluded. */
   progress: number;
-  /** Stars earned so far: 1 at a third, 2 at two thirds, 3 on completion. */
+  /** Stars earned so far: 1 at a third, 2 at two thirds, 3 on completion. Never drops. */
   stars: number;
 }
 
@@ -179,6 +179,10 @@ export interface FinalResults extends ScoreStats {
   difficulty: DifficultyName;
   tempo: Tempo;
   failMode: FailMode;
+  /**
+   * 1 when cleared. On a failed run, the furthest progress the run reached (what the
+   * HUD showed, never less than at the failure), so it agrees with `stars`.
+   */
   progress: number;
   /** 0 to 3; stars earned before a failure are kept. */
   stars: number;

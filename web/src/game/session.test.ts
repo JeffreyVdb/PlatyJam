@@ -292,7 +292,8 @@ describe('game session', () => {
         outcome: 'failed',
         failure: { kind: 'missedTile', lane: 0, tileIndex: 0 },
         miss: 1,
-        stars: 0,
+        // The song had passed a third before the Miss was finalized: that star stays.
+        stars: 1,
         perfectBadge: false,
       });
     });
@@ -309,6 +310,27 @@ describe('game session', () => {
       // The failure is the expiry of the tile at 1000, at its late boundary.
       expect(session.view().songMs).toBeCloseTo(1120 - REWIND_SONG_MS);
       expect(songMs()).toBe(stoppedAt);
+    });
+
+    it('never takes back progress or stars shown before a failure', async () => {
+      // One third of 3000 is 1000; the tap at 870 expires at 990.
+      await loaded([tap(870, 0), tap(3000, 1)], {
+        chart: chartWith([tap(870, 0), tap(3000, 1)], 3000),
+      });
+      session.start();
+      while (songMs() < 1000) frames(16);
+      expect(session.state).toBe('playing');
+      const shown = { ...session.stats() };
+      expect(shown.stars).toBe(1);
+      while (session.state === 'playing') frames(16);
+      expect(session.state).toBe('failing');
+      const failing = { ...session.stats() };
+      expect(failing.stars).toBeGreaterThanOrEqual(shown.stars);
+      expect(failing.progress).toBeGreaterThanOrEqual(shown.progress);
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(session.results?.outcome).toBe('failed');
+      expect(session.results?.stars).toBe(failing.stars);
+      expect(session.results?.progress).toBe(failing.progress);
     });
 
     it('keeps stars earned before a failure and names an empty tap', async () => {

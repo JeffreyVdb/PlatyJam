@@ -115,6 +115,8 @@ export function createGameplaySession({
   let timer: ReturnType<typeof setTimeout> | undefined;
   /** Voices of the hold being held, per tile index. */
   const holdVoices = new Map<number, PianoVoice[]>();
+  /** The furthest progress this run has reached; a failure never takes it back. */
+  let furthest = 0;
   /** When the run failed (performance ms) and where the clock stopped, for the rewind. */
   let failedAt = 0;
   let failedSongMs = 0;
@@ -169,6 +171,7 @@ export function createGameplaySession({
 
   const newSimulation = () => {
     holdVoices.clear();
+    furthest = 0;
     if (!config) return undefined;
     return createSimulation({
       tiles: tiles(),
@@ -181,10 +184,13 @@ export function createGameplaySession({
 
   const progressAt = (songMs: number) =>
     config && config.chart.durationMs > 0 ? clamp01(songMs / config.chart.durationMs) : 0;
+  /** Progress at `songMs`, or further if the run already got further. */
+  const reach = (songMs: number) => (furthest = Math.max(furthest, progressAt(songMs)));
 
   const buildResults = (current: Simulation, cfg: SessionConfig): FinalResults => {
     const cleared = current.status === 'complete';
-    const progress = cleared ? 1 : progressAt(current.endMs ?? 0);
+    // A failed run keeps the furthest progress it reached, and the stars that earned.
+    const progress = cleared ? 1 : reach(current.endMs ?? 0);
     const outcome = cleared ? 'cleared' : 'failed';
     return {
       ...current.score,
@@ -480,10 +486,10 @@ export function createGameplaySession({
         live.progress = results.progress;
         live.stars = results.stars;
       } else if (state === 'failing' && sim?.endMs !== undefined) {
-        live.progress = progressAt(sim.endMs);
+        live.progress = reach(sim.endMs);
         live.stars = starsFor(live.progress, false);
       } else {
-        live.progress = isRunActiveState() ? progressAt(engine.timeline.songTime()) : 0;
+        live.progress = isRunActiveState() ? reach(engine.timeline.songTime()) : 0;
         live.stars = starsFor(live.progress, false);
       }
       return live;
@@ -560,6 +566,7 @@ export function createGameplaySession({
 
     update() {
       if (!sim || !config || !isPlaying()) return;
+      reach(engine.timeline.songTime());
       const horizon = finalizationHorizon(judgeTime(now()), config.tempo);
       sim.advance(horizon);
       afterSimulation();
