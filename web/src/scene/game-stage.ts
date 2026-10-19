@@ -31,6 +31,7 @@ import { LANES, type Tile, tileEnd } from '../chart/schema';
 import type { JudgmentEvent } from '../game/session-contract';
 import type { StageView } from '../game/session';
 import { headDeadline } from '../game/judgment';
+import { prefersReducedMotion } from '../hud/motion';
 import { HEAD, TAIL } from '../game/simulation';
 import { fitCamera, type CameraFit } from './camera-fit';
 import { firstVisibleTile, laneForPoint, longestHold, tileDepth } from './lane-layout';
@@ -239,9 +240,17 @@ export interface GameStage {
 export interface GameStageOptions {
   /** The element the canvas fills, for pointer-to-lane mapping. */
   surface: HTMLElement;
+  /**
+   * Whether the player asked for less motion: the water stands still, hits skip the
+   * ripples and droplets, and failure highlights hold steady. Tiles still travel.
+   */
+  reducedMotion?: () => boolean;
 }
 
-export function createGameStage({ surface }: GameStageOptions): GameStage {
+export function createGameStage({
+  surface,
+  reducedMotion = () => prefersReducedMotion(),
+}: GameStageOptions): GameStage {
   const scene = new Scene();
   scene.background = RIVER_DEEP;
   const fog = new Fog(RIVER_DEEP, 1, 2);
@@ -282,6 +291,10 @@ export function createGameStage({ surface }: GameStageOptions): GameStage {
 
   let clock = 0;
   let pulse = 0;
+  /** `reducedMotion()`, read once per frame. */
+  let still = false;
+  /** Water time: stands still under reduced motion. */
+  let waterClock = 0;
   let builds = 0;
   let isLaneHeld: (lane: number) => boolean = () => false;
   let resources: Resources | undefined;
@@ -529,7 +542,7 @@ export function createGameStage({ surface }: GameStageOptions): GameStage {
     const failure =
       stage.state === 'failing' || stage.state === 'finished' ? simulation?.failure : undefined;
     const offender = failure?.kind === 'missedTile' ? failure.tileIndex : -1;
-    const blink = 0.5 + 0.5 * Math.sin(clock * 18);
+    const blink = still ? 0.5 : 0.5 + 0.5 * Math.sin(clock * 18);
 
     for (let i = firstVisibleTile(all, songMs - behindMs, longest); i < all.length; i += 1) {
       const tile = all[i];
@@ -628,7 +641,7 @@ export function createGameStage({ surface }: GameStageOptions): GameStage {
       laneGlow[lane] = Math.max(held, pulseLevel);
       if (lane === snagLane) {
         // An empty-tap failure: the pressed lane stays lit red at the line.
-        colour.copy(SNAG).multiplyScalar(0.55 + 0.25 * Math.sin(clock * 9));
+        colour.copy(SNAG).multiplyScalar(still ? 0.65 : 0.55 + 0.25 * Math.sin(clock * 9));
       } else if (sinceSnag < LANE_PULSE_S * 1.5) {
         colour.copy(SNAG).multiplyScalar(0.5 * (1 - sinceSnag / (LANE_PULSE_S * 1.5)));
       } else {
@@ -716,10 +729,12 @@ export function createGameStage({ surface }: GameStageOptions): GameStage {
   return {
     render(stage, deltaSeconds, renderer) {
       clock += deltaSeconds;
-      pulse = Math.max(0, pulse - deltaSeconds * 2.2);
+      still = reducedMotion();
+      if (!still) waterClock += deltaSeconds;
+      pulse = still ? 0 : Math.max(0, pulse - deltaSeconds * 2.2);
       if (!resources) return;
       const water = resources.water.uniforms;
-      if (water.uTime) water.uTime.value = clock;
+      if (water.uTime) water.uTime.value = waterClock;
       if (water.uPulse) water.uPulse.value = pulse;
       layoutTiles(resources, stage);
       layoutLanes(resources, stage);
@@ -738,6 +753,7 @@ export function createGameStage({ surface }: GameStageOptions): GameStage {
       const perfect = event.judgment === 'perfect';
       lanePulse[event.lane] = clock;
       if (strike) spawn(flashes, event.lane, perfect ? FOAM : RIPPLE);
+      if (still) return;
       spawn(ripples, event.lane, perfect ? BILL : RIPPLE);
       burst(event.lane, perfect ? BILL : RIPPLE, strike ? (perfect ? 10 : 6) : 4);
       pulse = Math.min(1, pulse + (perfect ? 0.35 : 0.2));
