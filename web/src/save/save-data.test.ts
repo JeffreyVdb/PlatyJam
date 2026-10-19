@@ -55,6 +55,7 @@ describe('parseSave', () => {
         masterVolume: 0.4,
         songId: 'fur-elise',
         difficulty: 'hard' as const,
+        latencyWarningMutedAtMs: 187,
       },
       bests: { 'fur-elise/hard/1.25': best() },
     };
@@ -91,6 +92,26 @@ describe('parseSave', () => {
       masterVolume: 0.5,
       difficulty: 'easy',
     });
+  });
+
+  it('keeps a saved "don\'t ask again" latency, and reads anything else as asking', () => {
+    const read = (value: unknown) =>
+      parseSave({ version: 1, settings: { latencyWarningMutedAtMs: value } }).settings
+        .latencyWarningMutedAtMs;
+    expect(read(187)).toBe(187);
+    expect(read(0)).toBe(0);
+    for (const bad of [-1, Number.NaN, 1e9, '187', true, undefined, null]) {
+      expect(read(bad)).toBeNull();
+    }
+  });
+
+  it('loads a save written before the latency warning, asking by default', () => {
+    const { settings } = parseSave({
+      version: 1,
+      settings: { failMode: 'relaxed', masterVolume: 0.5 },
+    });
+    expect(settings).toEqual({ ...DEFAULT_SETTINGS, failMode: 'relaxed', masterVolume: 0.5 });
+    expect(settings.latencyWarningMutedAtMs).toBeNull();
   });
 
   it('drops best scores with a bad key or bad values, and keeps the rest', () => {

@@ -31,6 +31,12 @@ export interface Settings {
   /** The song and difficulty last picked, so song select opens on them. */
   songId: string | null;
   difficulty: DifficultyName;
+  /**
+   * "Don't ask again" on the delayed-sound warning: the output latency (ms) measured when
+   * the player chose it, or null to ask whenever the sound is delayed. A delay far from
+   * this asks again (see `BAND_TOLERANCE_MS`).
+   */
+  latencyWarningMutedAtMs: number | null;
 }
 
 /**
@@ -65,6 +71,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   accompanimentVolume: 1,
   songId: null,
   difficulty: 'normal',
+  latencyWarningMutedAtMs: null,
 };
 
 export function defaultSave(): SaveData {
@@ -88,6 +95,9 @@ const isRecord = (value: unknown): value is Fields =>
 const isNumberIn = (value: unknown, min: number, max: number): value is number =>
   typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max;
 
+/** Well above any real output latency; anything larger is not a measurement. */
+const MAX_LATENCY_MS = 10_000;
+
 const isCount = (value: unknown): value is number =>
   typeof value === 'number' && Number.isInteger(value) && value >= 0;
 
@@ -99,7 +109,8 @@ function oneOf<T>(options: readonly T[], value: unknown, fallback: T): T {
 function parseSettings(json: unknown): Settings {
   const fields = isRecord(json) ? json : {};
   const d = DEFAULT_SETTINGS;
-  const { scrollDurationMs, masterVolume, accompanimentVolume, songId } = fields;
+  const { scrollDurationMs, masterVolume, accompanimentVolume, songId, latencyWarningMutedAtMs } =
+    fields;
   return {
     failMode: oneOf(FAIL_MODES, fields.failMode, d.failMode),
     scrollDurationMs: isNumberIn(scrollDurationMs, MIN_SCROLL_DURATION_MS, MAX_SCROLL_DURATION_MS)
@@ -112,6 +123,9 @@ function parseSettings(json: unknown): Settings {
       : d.accompanimentVolume,
     songId: typeof songId === 'string' && SLUG.test(songId) ? songId : d.songId,
     difficulty: oneOf(DIFFICULTIES, fields.difficulty, d.difficulty),
+    latencyWarningMutedAtMs: isNumberIn(latencyWarningMutedAtMs, 0, MAX_LATENCY_MS)
+      ? latencyWarningMutedAtMs
+      : d.latencyWarningMutedAtMs,
   };
 }
 
