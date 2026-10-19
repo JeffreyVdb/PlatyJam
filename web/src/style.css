@@ -21,6 +21,12 @@
   --foam-soft: #c9dbd6;
   /* Misses and failures: a snag in the river. */
   --snag: #ff6f61;
+  --bill-hover: #ffc12e;
+  /* Hairlines between rows, and the darker water a control sits in. */
+  --line: rgb(201 219 214 / 16%);
+  --sunk: rgb(3 14 22 / 38%);
+  /* The menus' veil over the stage: the lanes still show through. */
+  --veil: rgb(13 43 62 / 88%);
 
   --font: 'Shantell Sans', ui-rounded, 'SF Pro Rounded', system-ui, sans-serif;
   --edge: 16px;
@@ -28,6 +34,11 @@
   --radius-control: 12px;
   --shadow-card: 0 10px 28px rgb(3 14 22 / 45%), 0 2px 6px rgb(3 14 22 / 30%);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  /* Layers inside the HUD, bottom to top. */
+  --layer-screen: 1;
+  --layer-debug: 2;
+  --layer-notices: 3;
+  --layer-overlay: 4;
 
   color-scheme: dark;
 }
@@ -117,6 +128,8 @@ body {
 }
 
 .notices {
+  position: relative;
+  z-index: var(--layer-notices);
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -195,7 +208,7 @@ body {
 }
 
 .hud-button--primary:hover {
-  background: #ffc12e;
+  background: var(--bill-hover);
 }
 
 .hud-button--primary:active {
@@ -230,6 +243,7 @@ body {
   bottom: calc(env(safe-area-inset-bottom) + var(--edge));
   max-width: min(30rem, calc(100% - 2 * var(--edge)));
   padding: 12px 14px;
+  z-index: var(--layer-debug);
   border-radius: var(--radius-card);
   background: rgb(13 43 62 / 88%);
   box-shadow: var(--shadow-card);
@@ -388,10 +402,11 @@ body {
   margin-top: 10px;
 }
 
-/* "Tap to resume": the whole overlay is one button. Replaced by PLA-7's pause screen. */
+/* "Tap to resume": the whole overlay is one button. Outside a run only; a run has its pause screen. */
 .resume-overlay {
   position: fixed;
   inset: 0;
+  z-index: var(--layer-overlay);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -496,6 +511,7 @@ body {
 .calibration {
   position: fixed;
   inset: 0;
+  z-index: var(--layer-overlay);
   display: grid;
   grid-template-rows: auto 1fr;
   padding: calc(env(safe-area-inset-top) + var(--edge))
@@ -892,107 +908,12 @@ body {
   color: var(--snag);
 }
 
-/* ---- Interim screens: a stand-in until PLA-7's menus, pause and results ---- */
+/* ---- Pause, countdown and results (PLA-7) ---- */
 
-.hud > .start-panel {
-  position: fixed;
-  left: 50%;
-  top: var(--hit-line-y, 74%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: min(30rem, calc(100% - 2 * var(--edge)));
-  padding: 28px 24px 0;
-  transform: translate(-50%, calc(-100% + 44px));
-  text-align: center;
-  /* A pool of darker water so the text reads over the lanes. */
-  background: radial-gradient(closest-side, rgb(13 43 62 / 88%) 55%, rgb(13 43 62 / 0%));
-  pointer-events: none;
-  animation: overlay-in 280ms var(--ease-out) both;
-}
-
-.start-title {
-  margin: 0;
-  font-size: clamp(2rem, 6vmin, 3.25rem);
-  font-weight: 760;
-  letter-spacing: -0.015em;
-  line-height: 1.05;
-  text-wrap: balance;
-}
-
-.start-composer {
-  margin: 6px 0 0;
-  font-size: 1.125rem;
-  color: var(--foam-soft);
-}
-
-.start-settings {
-  margin: 4px 0 26px;
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--ripple);
-}
-
-.start-note {
-  min-height: 1.4em;
-  margin: 16px 0 0;
-  font-size: 0.9375rem;
-  line-height: 1.4;
-  color: var(--foam-soft);
-  font-variant-numeric: tabular-nums;
-  text-wrap: balance;
-}
-
-/* The Start tile: a big tile resting on the hit line. */
-.start-tile {
-  width: min(15rem, 70vw);
-  min-height: 88px;
-  border: 0;
-  border-radius: var(--radius-card);
-  background: var(--bill);
-  color: var(--river-deep);
-  font: inherit;
-  font-size: 1.75rem;
-  font-weight: 760;
-  letter-spacing: -0.01em;
-  cursor: pointer;
-  pointer-events: auto;
-  touch-action: manipulation;
-  box-shadow:
-    inset 0 -6px 0 var(--bill-pressed),
-    0 10px 28px rgb(3 14 22 / 50%);
-  transition:
-    transform 120ms ease-out,
-    box-shadow 120ms ease-out,
-    opacity 200ms ease-out;
-}
-
-.start-tile:hover {
-  background: #ffc12e;
-}
-
-.start-tile:active {
-  transform: translateY(3px);
-  box-shadow:
-    inset 0 -2px 0 var(--bill-pressed),
-    0 6px 16px rgb(3 14 22 / 45%);
-}
-
-.start-tile:focus-visible {
-  outline: 3px solid var(--ripple);
-  outline-offset: 4px;
-}
-
-.start-tile:disabled {
-  cursor: default;
-  opacity: 0.55;
-  background: var(--bill);
-  transform: none;
-}
-
-.game-sheet {
+.hud > .game-sheet {
   position: fixed;
   inset: 0;
+  z-index: var(--layer-screen);
   display: grid;
   place-items: center;
   padding: calc(env(safe-area-inset-top) + var(--edge))
@@ -1075,10 +996,56 @@ body {
 
 .result-star.is-earned {
   color: var(--bill);
+  /* The results' one moment: earned stars land one after another. */
+  animation: star-land 520ms var(--ease-out) calc(180ms + var(--i, 0) * 140ms) both;
+}
+
+.result-score-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin: 0 0 14px;
+}
+
+.result-badge {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+  color: var(--foam-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.result-badge[hidden] {
+  display: none;
+}
+
+.result-badge.is-new {
+  padding: 5px 14px 6px;
+  border-radius: 999px;
+  background: var(--bill);
+  color: var(--river-deep);
+  font-weight: 760;
+  box-shadow: inset 0 -3px 0 var(--bill-pressed);
+  animation: badge-in 560ms var(--ease-out) 620ms both;
+}
+
+@keyframes star-land {
+  from {
+    opacity: 0;
+    transform: translateY(-14px) scale(0.6) rotate(-18deg);
+  }
+}
+
+@keyframes badge-in {
+  from {
+    opacity: 0;
+    transform: scale(0.7);
+  }
 }
 
 .result-score {
-  margin: 0 0 14px;
+  margin: 0;
   font-size: 2.75rem;
   font-weight: 780;
   font-variant-numeric: tabular-nums;
@@ -1118,6 +1085,7 @@ body {
 .hud > .countdown {
   position: fixed;
   inset: 0;
+  z-index: var(--layer-screen);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1149,6 +1117,852 @@ body {
   text-wrap: balance;
 }
 
+/* ---- Menus (PLA-7): Home, song select, settings, credits ---- */
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The small brand steps aside for the screens' own titles. */
+.hud.has-menu .brand {
+  visibility: hidden;
+}
+
+/* Below the screens' bar, so a lasting notice never covers Settings or Credits. */
+.hud.has-menu .notices {
+  margin-top: 60px;
+}
+
+.hud > .screen {
+  /* The width of the screen's content; the bar lines up with it. */
+  --screen-width: 36rem;
+  position: fixed;
+  inset: 0;
+  z-index: var(--layer-screen);
+  display: flex;
+  flex-direction: column;
+  padding: calc(env(safe-area-inset-top) + var(--edge))
+    calc(env(safe-area-inset-right) + var(--edge)) calc(env(safe-area-inset-bottom) + var(--edge))
+    calc(env(safe-area-inset-left) + var(--edge));
+  background: var(--veil);
+  animation: overlay-in 240ms var(--ease-out) both;
+}
+
+.screen-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  width: min(var(--screen-width), 100%);
+  min-height: 52px;
+  margin: 0 auto 12px;
+}
+
+.screen-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 760;
+  letter-spacing: -0.015em;
+  line-height: 1.1;
+}
+
+/* Focused on open so screen readers start here; it is not a control. */
+.screen-title:focus {
+  outline: none;
+}
+
+.screen-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.screen-body {
+  flex: 1;
+  min-height: 0;
+}
+
+.screen-column {
+  width: min(var(--screen-width), 100%);
+  margin: 0 auto;
+  padding: 4px 0 24px;
+}
+
+.screen-lede {
+  max-width: 60ch;
+  margin: 0 0 8px;
+  font-size: 1.125rem;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.screen-subtitle {
+  margin: 28px 0 14px;
+  font-size: 1.25rem;
+  font-weight: 720;
+  letter-spacing: -0.01em;
+}
+
+.icon-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 22px;
+  background: var(--river);
+  color: var(--foam);
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 650;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition:
+    background-color 120ms ease-out,
+    transform 120ms ease-out;
+}
+
+.icon-button--text {
+  padding: 0 16px 0 12px;
+}
+
+.icon-button:hover {
+  background: var(--river-raised);
+}
+
+.icon-button:active {
+  transform: scale(0.96);
+}
+
+.icon-button:focus-visible {
+  outline: 3px solid var(--ripple);
+  outline-offset: 3px;
+}
+
+.line-icon {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.line-icon .note-head {
+  fill: currentcolor;
+  stroke: none;
+}
+
+/* Narrow windows: the bar's buttons keep their icons and lose their words. */
+@media (max-width: 34rem) {
+  .icon-button--text {
+    padding: 0 10px;
+  }
+
+  .icon-button-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* -- Home: the wordmark, and the first tile resting on the hit line -- */
+
+.hud > .screen--home {
+  align-items: center;
+  padding-top: calc(env(safe-area-inset-top) + clamp(28px, 11vh, 120px));
+  background: linear-gradient(
+    to bottom,
+    rgb(13 43 62 / 92%),
+    rgb(13 43 62 / 55%) var(--hit-line-y, 74%),
+    rgb(13 43 62 / 80%)
+  );
+  text-align: center;
+  cursor: pointer;
+}
+
+.home-title {
+  margin: 0;
+  font-size: clamp(3.25rem, 13vmin, 6rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.home-word {
+  display: inline-flex;
+  align-items: baseline;
+  padding-top: 0.25em;
+  text-shadow: 0 6px 24px rgb(3 14 22 / 55%);
+}
+
+/* Each letter sits at its own pitch, and lands there once, like notes in a phrase. */
+.home-letter {
+  display: inline-block;
+  transform: translateY(var(--rise));
+  animation: letter-land 760ms var(--ease-out) calc(120ms + var(--i) * 60ms) both;
+}
+
+.home-tagline {
+  max-width: 28ch;
+  margin: 18px 0 0;
+  font-size: clamp(1.0625rem, 2.6vmin, 1.375rem);
+  font-weight: 450;
+  line-height: 1.4;
+  color: var(--foam-soft);
+  text-wrap: balance;
+}
+
+.home-tile {
+  position: fixed;
+  left: 50%;
+  top: var(--hit-line-y, 74%);
+  width: min(17rem, 72vw);
+  min-height: 92px;
+  border: 0;
+  border-radius: var(--radius-card);
+  background: var(--bill);
+  color: var(--river-deep);
+  font: inherit;
+  font-size: 1.75rem;
+  font-weight: 780;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  touch-action: manipulation;
+  transform: translate(-50%, -50%);
+  box-shadow:
+    inset 0 -6px 0 var(--bill-pressed),
+    0 10px 28px rgb(3 14 22 / 50%);
+  transition:
+    transform 120ms ease-out,
+    box-shadow 120ms ease-out;
+}
+
+/* Ripples spreading from the tile: the screen's one moving part. */
+.home-tile::before,
+.home-tile::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 0 2px var(--ripple);
+  opacity: 0;
+  animation: tile-ripple 2.6s var(--ease-out) 1s infinite;
+  pointer-events: none;
+}
+
+.home-tile::after {
+  animation-delay: 2.3s;
+}
+
+.home-tile:hover {
+  background: var(--bill-hover);
+}
+
+.screen--home:active .home-tile {
+  transform: translate(-50%, calc(-50% + 3px));
+  box-shadow:
+    inset 0 -2px 0 var(--bill-pressed),
+    0 6px 16px rgb(3 14 22 / 45%);
+}
+
+.home-tile:focus-visible {
+  outline: 3px solid var(--ripple);
+  outline-offset: 5px;
+}
+
+@keyframes letter-land {
+  from {
+    opacity: 0;
+    transform: translateY(calc(var(--rise) - 0.5em));
+  }
+}
+
+@keyframes tile-ripple {
+  0% {
+    opacity: 0.7;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.18, 1.5);
+  }
+}
+
+/* -- Segmented choices: native radios behind tile-like faces -- */
+
+.choice {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.choice-legend {
+  margin-bottom: 8px;
+  padding: 0;
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.choice-track {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: calc(var(--radius-control) + 4px);
+  background: var(--sunk);
+}
+
+.choice-option {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.choice-input,
+.song-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.choice-face {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 8px;
+  border-radius: var(--radius-control);
+  color: var(--foam-soft);
+  font-size: 1rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease-out,
+    color 140ms ease-out;
+}
+
+.choice-option:hover .choice-face {
+  color: var(--foam);
+}
+
+.choice-input:checked + .choice-face {
+  background: var(--ripple);
+  color: var(--river-deep);
+}
+
+.choice-input:focus-visible + .choice-face {
+  outline: 3px solid var(--foam);
+  outline-offset: 2px;
+}
+
+.choice--tabs .choice-face {
+  min-height: 48px;
+  font-size: 1.0625rem;
+}
+
+/* Difficulty: one, two or three rising bars, a small crescendo. */
+.difficulty-pips {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 14px;
+}
+
+.difficulty-pip {
+  width: 4px;
+  border-radius: 2px;
+  background: currentcolor;
+}
+
+.difficulty-pip:nth-child(1) {
+  height: 7px;
+}
+
+.difficulty-pip:nth-child(2) {
+  height: 10.5px;
+}
+
+.difficulty-pip:nth-child(3) {
+  height: 14px;
+}
+
+/* -- Song select: the list beside (or above) the picked song and its Play tile -- */
+
+.hud > .screen--songs {
+  --screen-width: 44rem;
+}
+
+.screen--songs .screen-body {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 14px;
+  width: min(var(--screen-width), 100%);
+  margin: 0 auto;
+}
+
+.songs-browse {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.song-list-caption {
+  margin: 12px 2px 8px;
+  font-size: 0.9375rem;
+  color: var(--foam-soft);
+}
+
+.song-scroller {
+  flex: 1;
+  min-height: 0;
+  margin: 0 -6px;
+  padding: 4px 6px 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  scrollbar-color: var(--river-raised) transparent;
+  scrollbar-width: thin;
+}
+
+.song-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Each song is a tile; the picked one lights up like a tile that was hit. */
+.song-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 16px;
+  min-height: 68px;
+  padding: 12px 16px 15px 18px;
+  border-radius: var(--radius-control);
+  background: var(--river);
+  box-shadow: inset 0 -5px 0 rgb(3 14 22 / 30%);
+  cursor: pointer;
+  touch-action: pan-y;
+  transition:
+    background-color 140ms ease-out,
+    color 140ms ease-out,
+    transform 120ms ease-out;
+}
+
+.song-row:hover {
+  background: var(--river-raised);
+}
+
+.song-row:active {
+  transform: translateY(2px);
+}
+
+.song-row.is-picked {
+  background: var(--bill);
+  color: var(--river-deep);
+  box-shadow:
+    inset 0 -5px 0 var(--bill-pressed),
+    0 8px 22px rgb(3 14 22 / 40%);
+}
+
+.song-row:has(.song-input:focus-visible) {
+  outline: 3px solid var(--ripple);
+  outline-offset: 3px;
+}
+
+.song-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.song-title {
+  font-size: 1.125rem;
+  font-weight: 700;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+
+.song-composer {
+  font-size: 0.9375rem;
+  line-height: 1.3;
+  color: var(--foam-soft);
+}
+
+.is-picked .song-composer {
+  color: rgb(13 43 62 / 78%);
+}
+
+.song-best {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.song-best-score {
+  font-size: 1rem;
+  font-weight: 720;
+  font-variant-numeric: tabular-nums;
+}
+
+.song-best-none {
+  font-size: 0.9375rem;
+  color: var(--foam-soft);
+}
+
+.is-picked .song-best-none {
+  color: rgb(13 43 62 / 72%);
+}
+
+.star-row {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.star-row-star {
+  width: 20px;
+  height: 20px;
+  color: rgb(201 219 214 / 28%);
+}
+
+.star-row--small .star-row-star {
+  width: 18px;
+  height: 18px;
+}
+
+.star-row-star.is-earned {
+  color: var(--bill);
+}
+
+.is-picked .star-row-star {
+  color: rgb(13 43 62 / 22%);
+}
+
+.is-picked .star-row-star.is-earned {
+  color: var(--river-deep);
+}
+
+.is-picked .star-icon {
+  filter: none;
+}
+
+.song-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--radius-card);
+  background: var(--river);
+  box-shadow: var(--shadow-card);
+}
+
+.song-panel-title {
+  margin: 0;
+  font-size: 1.375rem;
+  font-weight: 740;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+.song-panel-facts {
+  margin: -6px 0 2px;
+  font-size: 0.9375rem;
+  line-height: 1.4;
+  color: var(--foam-soft);
+  text-wrap: pretty;
+}
+
+/* The Play tile: the same tile as Home's, at the end of every choice. */
+.play-tile {
+  min-height: 72px;
+  border: 0;
+  border-radius: var(--radius-card);
+  background: var(--bill);
+  color: var(--river-deep);
+  font: inherit;
+  font-size: 1.625rem;
+  font-weight: 780;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  touch-action: manipulation;
+  box-shadow:
+    inset 0 -6px 0 var(--bill-pressed),
+    0 8px 22px rgb(3 14 22 / 45%);
+  transition:
+    transform 120ms ease-out,
+    box-shadow 120ms ease-out,
+    opacity 200ms ease-out;
+}
+
+.play-tile:hover {
+  background: var(--bill-hover);
+}
+
+.play-tile:active {
+  transform: translateY(3px);
+  box-shadow:
+    inset 0 -2px 0 var(--bill-pressed),
+    0 4px 12px rgb(3 14 22 / 40%);
+}
+
+.play-tile:focus-visible {
+  outline: 3px solid var(--ripple);
+  outline-offset: 4px;
+}
+
+.play-tile[aria-disabled='true'] {
+  background: var(--bill);
+  cursor: default;
+  opacity: 0.55;
+  transform: none;
+}
+
+.play-note {
+  min-height: 1.4em;
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.4;
+  color: var(--foam-soft);
+  font-variant-numeric: tabular-nums;
+  text-wrap: pretty;
+}
+
+.play-tile[data-action='retry'] + .play-note,
+.play-tile[data-action='reload'] + .play-note {
+  color: var(--foam);
+}
+
+/* Wide windows: the list on the left, the picked song on the right. */
+@media (min-width: 40rem) and (min-aspect-ratio: 5/4) {
+  .hud > .screen--songs {
+    --screen-width: 64rem;
+  }
+
+  .screen--songs .screen-body {
+    grid-template-columns: minmax(0, 1.45fr) minmax(16rem, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .songs-browse {
+    height: 100%;
+  }
+
+  .song-panel {
+    max-height: 100%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+
+/* -- Settings and credits: one readable column that scrolls -- */
+
+.screen--settings .screen-body,
+.screen--credits .screen-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  scrollbar-color: var(--river-raised) transparent;
+  scrollbar-width: thin;
+}
+
+.settings-group + .settings-group {
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.settings-group .choice {
+  margin-top: 6px;
+}
+
+.settings-hint {
+  margin: 8px 0 18px;
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  color: var(--foam-soft);
+  text-wrap: pretty;
+}
+
+.settings-text {
+  max-width: 60ch;
+  margin: 0 0 8px;
+  font-size: 1.0625rem;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.slider-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px 12px;
+  margin-bottom: 10px;
+}
+
+.slider-label {
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.slider-value {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--foam-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 44 px tall to touch; the visible track is 8 px. Horizontal drags are ours. */
+.slider {
+  --value: 1;
+  position: relative;
+  grid-column: 1 / -1;
+  height: 44px;
+  cursor: pointer;
+  touch-action: pan-y;
+}
+
+.slider-track {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  left: 14px;
+  height: 8px;
+  margin-top: -4px;
+  border-radius: 4px;
+  background: var(--sunk);
+}
+
+.slider-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--ripple);
+  transform: scaleX(var(--value));
+  transform-origin: left center;
+}
+
+.slider-thumb {
+  position: absolute;
+  top: 50%;
+  left: calc(14px + (100% - 28px) * var(--value));
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
+  border-radius: 50%;
+  background: var(--foam);
+  box-shadow: 0 2px 8px rgb(3 14 22 / 50%);
+  transition: transform 120ms ease-out;
+}
+
+.slider:active .slider-thumb {
+  transform: scale(1.12);
+}
+
+.slider:focus-visible {
+  outline: none;
+}
+
+.slider:focus-visible .slider-thumb {
+  outline: 3px solid var(--ripple);
+  outline-offset: 3px;
+}
+
+.screen--credits {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.credit-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.credit {
+  padding: 16px 0 18px;
+  border-top: 1px solid var(--line);
+}
+
+.credit-title {
+  margin: 0 0 2px;
+  font-size: 1.125rem;
+  font-weight: 700;
+  line-height: 1.3;
+  text-wrap: balance;
+}
+
+.credit-byline {
+  margin: 0 0 10px;
+  line-height: 1.4;
+  color: var(--foam-soft);
+}
+
+.credit-facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 16px;
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.4;
+}
+
+.credit-label {
+  color: var(--foam-soft);
+}
+
+.credit-value {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.credit-link {
+  color: var(--ripple);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+}
+
+.credit-link:hover {
+  color: var(--foam);
+}
+
+.credit-link:focus-visible {
+  outline: 3px solid var(--ripple);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 .noscript {
   position: fixed;
   inset: 0;
@@ -1166,9 +1980,18 @@ body {
   .resume-overlay,
   .calibration,
   .calibration-ripple,
-  .start-panel,
-  .game-sheet {
+  .hud > .game-sheet,
+  .hud > .screen,
+  .home-letter,
+  .result-star.is-earned,
+  .result-badge.is-new {
     animation: none;
+  }
+
+  .home-tile::before,
+  .home-tile::after {
+    animation: none;
+    opacity: 0;
   }
 
   .play-star {
