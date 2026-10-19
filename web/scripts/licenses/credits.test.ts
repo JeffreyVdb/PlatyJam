@@ -88,6 +88,22 @@ describe('buildCredits', () => {
     ]);
   });
 
+  it('names a recording artist once when the author repeats the composer', () => {
+    const song = fixture.entries.find((entry) => entry.id === 'zebra-song');
+    if (song?.kind !== 'song') throw new Error('fixture');
+    const manifest = parseManifest({
+      entries: [
+        { ...song, composer: 'An Artist', author: 'An Artist' },
+        { ...song, id: 'b-song', composer: 'An Artist', author: 'An Artist (example.com)' },
+      ],
+    });
+    const [songs] = buildCredits(manifest).sections;
+    expect(songs?.items.map((item) => item.byline)).toEqual([
+      'An Artist (example.com)',
+      'An Artist',
+    ]);
+  });
+
   it('is valid credits data and deterministic', () => {
     const credits = buildCredits(fixture);
     expect(parseCredits(credits)).toEqual(credits);

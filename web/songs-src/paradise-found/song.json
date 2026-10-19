@@ -1,0 +1,27 @@
+{
+  "title": "Paradise Found",
+  "composer": "Kevin MacLeod",
+  "arranger": "PlatyJam contributors (chart transcription)",
+  "license": {
+    "source": "https://incompetech.com/music/royalty-free/index.html?isrc=USUAN2300000",
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "author": "Kevin MacLeod (incompetech.com)"
+  },
+  "melody": {
+    "trackName": "lead"
+  },
+  "audio": {
+    "src": "songs/paradise-found.m4a",
+    "offsetMs": 322
+  },
+  "difficulties": {
+    "easy": {
+      "minStrength": "any",
+      "minIntervalMs": 850
+    },
+    "normal": {
+      "minIntervalMs": 330
+    }
+  }
+}

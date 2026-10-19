@@ -1,0 +1,27 @@
+{
+  "title": "Beach Tropical House",
+  "composer": "AurosonMusic",
+  "arranger": "PlatyJam contributors (chart transcription)",
+  "license": {
+    "source": "https://freemusicarchive.org/music/aurosonmusic/single/beach-tropical-house/",
+    "license": "CC BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+    "author": "AurosonMusic"
+  },
+  "melody": {
+    "trackName": "lead"
+  },
+  "audio": {
+    "src": "songs/beach-tropical-house.m4a",
+    "offsetMs": 451
+  },
+  "difficulties": {
+    "easy": {
+      "minStrength": "any",
+      "minIntervalMs": 850
+    },
+    "normal": {
+      "minIntervalMs": 330
+    }
+  }
+}

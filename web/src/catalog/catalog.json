@@ -24,6 +24,28 @@
       }
     },
     {
+      "id": "beach-tropical-house",
+      "title": "Beach Tropical House",
+      "composer": "AurosonMusic",
+      "arranger": "PlatyJam contributors (chart transcription)",
+      "durationMs": 198382,
+      "bpm": 102,
+      "difficulties": {
+        "easy": {
+          "tiles": 150,
+          "notesPerSecond": 0.76
+        },
+        "normal": {
+          "tiles": 305,
+          "notesPerSecond": 1.54
+        },
+        "hard": {
+          "tiles": 410,
+          "notesPerSecond": 2.07
+        }
+      }
+    },
+    {
       "id": "billabong-morning",
       "title": "Billabong Morning",
       "composer": "PlatyJam song generator (seed 95)",
@@ -64,6 +86,28 @@
         "hard": {
           "tiles": 501,
           "notesPerSecond": 3.84
+        }
+      }
+    },
+    {
+      "id": "paradise-found",
+      "title": "Paradise Found",
+      "composer": "Kevin MacLeod",
+      "arranger": "PlatyJam contributors (chart transcription)",
+      "durationMs": 183428,
+      "bpm": 105,
+      "difficulties": {
+        "easy": {
+          "tiles": 161,
+          "notesPerSecond": 0.88
+        },
+        "normal": {
+          "tiles": 382,
+          "notesPerSecond": 2.08
+        },
+        "hard": {
+          "tiles": 537,
+          "notesPerSecond": 2.93
         }
       }
     },

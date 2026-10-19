@@ -43,6 +43,11 @@ export function formatCredits(credits: Credits): string {
   return `${JSON.stringify(credits, null, 2)}\n`;
 }
 
+/** Composer and author; just the author when it names the composer again (an artist's own recording). */
+function songByline(composer: string, author: string): string {
+  return author.startsWith(composer) ? author : `${composer} · ${author}`;
+}
+
 function toCredit(entry: Entry): Credit {
   // parseManifest() has already rejected these; this keeps the types honest.
   if (!isLicenseName(entry.license)) throw new Error(`${entry.id}: unknown licence`);
@@ -50,7 +55,7 @@ function toCredit(entry: Entry): Credit {
   const credit: Credit = {
     id: entry.id,
     title: entry.title,
-    byline: entry.kind === 'song' ? `${entry.composer} · ${entry.author}` : entry.author,
+    byline: entry.kind === 'song' ? songByline(entry.composer, entry.author) : entry.author,
     license: { label, url: entry.licenseUrl },
     source: entry.source,
     changes: entry.modifications,

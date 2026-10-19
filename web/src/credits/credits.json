@@ -17,6 +17,17 @@
           "changes": "MIDI unmodified; charted with the PlatyJam converter."
         },
         {
+          "id": "beach-tropical-house",
+          "title": "Beach Tropical House",
+          "byline": "AurosonMusic",
+          "license": {
+            "label": "CC BY 4.0",
+            "url": "https://creativecommons.org/licenses/by/4.0/"
+          },
+          "source": "https://freemusicarchive.org/music/aurosonmusic/single/beach-tropical-house/",
+          "changes": "Lead melody transcribed by PlatyJam contributors into a MIDI chart (simplified); the recording re-encoded to AAC with the cover art removed."
+        },
+        {
           "id": "beethoven-fur-elise",
           "title": "Für Elise, WoO 59",
           "byline": "L. van Beethoven (1770–1827) · Stelios Samelis, typeset for the Mutopia Project",
@@ -48,6 +59,17 @@
           },
           "source": "https://github.com/JeffreyVdb/PlatyJam/tree/main/web/songs-src/billabong-morning",
           "changes": "Original work, made with the PlatyJam song generator; charted with the PlatyJam converter."
+        },
+        {
+          "id": "paradise-found",
+          "title": "Paradise Found",
+          "byline": "Kevin MacLeod (incompetech.com)",
+          "license": {
+            "label": "CC BY 4.0",
+            "url": "https://creativecommons.org/licenses/by/4.0/"
+          },
+          "source": "https://incompetech.com/music/royalty-free/index.html?isrc=USUAN2300000",
+          "changes": "Lead melody transcribed by PlatyJam contributors into a MIDI chart (simplified); the recording re-encoded to AAC."
         },
         {
           "id": "satie-gymnopedie-1",
