@@ -78,6 +78,8 @@ export interface PlayButtonInput {
   startFailed: boolean;
 }
 
+const FAILED_NOTE =
+  "This song didn't download. Check your connection and try again, or pick another song.";
 const OFFLINE_NOTE =
   "This song isn't on this device yet. Connect to the internet once to download it, or pick a song you've played before.";
 
@@ -104,11 +106,8 @@ export function playButtonFor({
       if (loading.chartLoaded) {
         return { action: 'reload', label: 'Reload', note: error ?? "The piano didn't load." };
       }
-      return {
-        action: 'retry',
-        label: 'Try again',
-        note: online ? (error ?? "This song didn't load.") : OFFLINE_NOTE,
-      };
+      // The session's error names the technical cause (logged); the player needs the way out.
+      return { action: 'retry', label: 'Try again', note: online ? FAILED_NOTE : OFFLINE_NOTE };
     case 'ready':
     case 'quit':
     case 'finished':

@@ -528,6 +528,18 @@ describe('menus', () => {
     closeCalibration();
     expect(q('.screen--settings').inert).toBe(false);
     expect(document.activeElement?.textContent).toBe('Calibrate timing');
+
+    // Its Escape closes it first (in a handler on the sheet), then reaches the window.
+    tap(buttonNamed('Calibrate timing'));
+    const sheet = document.createElement('div');
+    sheet.className = 'calibration';
+    root.append(sheet);
+    sheet.addEventListener('keydown', () => {
+      sheet.remove();
+      closeCalibration();
+    });
+    key('Escape', sheet);
+    expect(menus?.view).toBe('settings');
   });
 
   it('credits every work in the credits data, with real links that open outside the game', () => {

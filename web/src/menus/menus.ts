@@ -281,6 +281,7 @@ export function createMenus({
       // Decided against the stored best before saving, per song, difficulty and tempo.
       recorded = store.recordResults(session.results);
     }
+    if (state === 'error') console.warn(`[platyjam] ${session.error ?? 'the song did not load'}`);
     if (previous === 'starting' && state !== 'leadIn') startFailed = true;
     if (state === 'leadIn') startFailed = false;
     render();
@@ -310,6 +311,8 @@ export function createMenus({
 
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.repeat || event.defaultPrevented || calibrating) return;
+    // The calibration closes itself on Escape before this runs: that key was its own.
+    if (event.target instanceof Element && event.target.closest('.calibration')) return;
     const view = viewFor(menu, session.state);
     if (event.key === 'Escape') {
       if (view === 'play') {

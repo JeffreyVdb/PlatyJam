@@ -108,7 +108,7 @@ describe('playButtonFor', () => {
     expect(playButtonFor({ ...failed, error: "This song didn't load. HTTP 500" })).toEqual({
       action: 'retry',
       label: 'Try again',
-      note: "This song didn't load. HTTP 500",
+      note: "This song didn't download. Check your connection and try again, or pick another song.",
     });
     expect(playButtonFor({ ...failed, error: 'x', online: false })).toEqual({
       action: 'retry',

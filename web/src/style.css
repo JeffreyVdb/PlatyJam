@@ -1759,9 +1759,31 @@ body {
   text-wrap: pretty;
 }
 
+.play-note:empty {
+  /* Still in the layout, so the live region keeps working; the gap closes up. */
+  min-height: 0;
+  margin-top: -12px;
+}
+
 .play-tile[data-action='retry'] + .play-note,
 .play-tile[data-action='reload'] + .play-note {
   color: var(--foam);
+}
+
+/* Short, narrow windows: the list needs the room; the picked row already names the song. */
+@media (max-height: 48rem) and (max-aspect-ratio: 5/4) {
+  .song-panel-title,
+  .song-panel-facts {
+    display: none;
+  }
+
+  .song-panel {
+    padding: 12px;
+  }
+
+  .play-tile {
+    min-height: 60px;
+  }
 }
 
 /* Wide windows: the list on the left, the picked song on the right. */
