@@ -3,6 +3,7 @@ import { installDebugHook, isDebugEnabled } from './app/debug';
 import { installPageLifecycle, lifecycle } from './app/lifecycle';
 import { setupServiceWorker } from './app/pwa';
 import { setupStoragePersistence } from './app/storage';
+import { createSafeAreaProbe } from './app/safe-area';
 import { installTouchGuards } from './app/touch-guards';
 import { watchViewport } from './app/viewport';
 import { createGameAudio, type GameAudio } from './audio/game-audio';
@@ -216,9 +217,12 @@ function main() {
   }
 
   const scene = createGameStage({ surface: stage });
+  const safeArea = createSafeAreaProbe(hudRoot);
   lifecycle.on('resize', ({ width, height }) => {
-    scene.resize(width, height);
-    // The HUD places the combo and judgment just above the hit line.
+    scene.resize(width, height, safeArea.read());
+    // The HUD lays itself out for the stage's layout (portrait or landscape) and places
+    // the combo and judgment relative to the hit line.
+    hudRoot.dataset.layout = scene.layout;
     hudRoot.style.setProperty('--hit-line-y', `${(scene.hitLineY() * 100).toFixed(2)}%`);
   });
   // Every GPU resource died with the old context; rebuild before the loop restarts.
