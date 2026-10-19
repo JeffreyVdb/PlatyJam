@@ -342,7 +342,8 @@ export function createSimulation({
 
     resume(songMs) {
       reclaimed.clear();
-      for (let index = 0; index < count; index += 1) {
+      // In chart order; a Classic run ends at the first Miss.
+      for (let index = 0; index < count && status === 'running'; index += 1) {
         if (tails[index] === TAIL.suspended) finishTail(index, 'miss', songMs);
       }
     },

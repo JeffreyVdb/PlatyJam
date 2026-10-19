@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Tile } from '../chart/schema';
 import type { FailMode, JudgmentEvent } from './session-contract';
-import { createSimulation, finalizationHorizon, type Simulation } from './simulation';
+import { createSimulation, finalizationHorizon, type Simulation, TAIL } from './simulation';
 
 const tap = (t: number, lane: number): Tile => ({ t, lane, pitches: [60], vel: 90 });
 const hold = (t: number, lane: number, dur: number): Tile => ({
@@ -250,6 +250,23 @@ describe('simulation', () => {
       sim.reclaim('k', 0);
       sim.resume(1500);
       expect(sim.failure).toEqual({ kind: 'missedTile', lane: 3, tileIndex: 1 });
+    });
+
+    it('stops judging at the first unreclaimed tail in Classic, in chart order', () => {
+      const { sim, summary } = pausedAt1500();
+      sim.resume(1500);
+      expect(summary().slice(2)).toEqual(['tail:miss@0#0']);
+      expect(sim.failure).toEqual({ kind: 'missedTile', lane: 0, tileIndex: 0 });
+      expect(sim.score.perfect).toBe(2);
+      expect(sim.score.miss).toBe(1);
+      expect(sim.tails[1]).toBe(TAIL.suspended);
+    });
+
+    it('turns every unreclaimed tail into a Miss in Relaxed', () => {
+      const { sim, summary } = pausedAt1500('relaxed');
+      sim.resume(1500);
+      expect(summary().slice(2)).toEqual(['tail:miss@0#0', 'tail:miss@3#1']);
+      expect(sim.status).toBe('running');
     });
 
     it('lets a reclaiming input change its mind during the countdown', () => {
