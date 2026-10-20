@@ -147,7 +147,7 @@ describe('headroom', () => {
   });
 
   it('never clips, even with every effect starting within the repeat window', () => {
-    // The worst there can be: each one-shot once (the repeat window stops a second),
+    // The most there can be: each one-shot once (the repeat window stops a second),
     // at full Effects and master volume, at many relative offsets.
     const steps = [0, 0.005, 0.01, 0.02, REPEAT_WINDOW_S];
     let worst = 0;
