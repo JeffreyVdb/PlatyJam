@@ -1077,6 +1077,28 @@ describe('game session', () => {
     };
     const noteOns = () => fake.piano.noteOn.mock.calls as unknown[][];
 
+    // A handheld tile: its head and slack reach 64 ms either side of its centre.
+    describe.each([-100, 0, 100])('with an input offset of %s ms', (offsetMs) => {
+      it.each([
+        ['its centre', 0],
+        ['its near edge', -60],
+        ['its far edge', 60],
+      ])('clears the tile drawn under the finger, pressed on %s', async (_, edgeMs) => {
+        await loadTiles([tap(500, 0), tap(900, 1)]);
+        fake.inputOffsetMs = offsetMs;
+        const judged: number[] = [];
+        session.events.on('judgment', (event) => judged.push(event.songMs));
+        session.start();
+        frames(1200); // song 200 on screen: the tile is 300 ms up the lane
+        touch('a', 0, { ...on(500 + edgeMs), reach: 64 / SCROLL_MS });
+        expect(session.stats()).toMatchObject({ clear: 1, miss: 0 });
+        expect(session.state).toBe('playing');
+        // Which tile is read from the board; when it counts is calibrated.
+        expect(judged).toHaveLength(1);
+        expect(judged[0]).toBeCloseTo(200 - offsetMs, 6);
+      });
+    });
+
     it('plays a tile claimed early on its beat, on the song clock', async () => {
       await loadTiles([tap(500, 0), tap(900, 1)]);
       session.start();

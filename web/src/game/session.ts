@@ -538,9 +538,10 @@ export function createGameplaySession({
         return;
       }
       if (!isPlaying()) return;
-      // The finger's place along the lane is read at the time the press is judged.
-      const songMs = judgeTime(timeStamp);
-      sim.press(id, lane, songMs, spot && aimOf(spot, songMs));
+      // The tile under the finger is the one drawn there when it landed, whatever the
+      // input calibration; the calibrated time is when the press counts.
+      const aim = spot && aimOf(spot, engine.timeline.shownSongTime(timeStamp));
+      sim.press(id, lane, judgeTime(timeStamp), aim);
       afterSimulation();
     },
     release(id, timeStamp) {

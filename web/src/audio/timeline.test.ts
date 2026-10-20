@@ -109,6 +109,17 @@ describe('createTimeline', () => {
     expect(timeline.judgeSongTime(250 + 2500)).toBeCloseTo(2500, 9);
   });
 
+  it('reads what was shown at an event through the output mapping, with no input offset', () => {
+    const { state, clock, timeline, advance } = world({ skewMs: 250 });
+    state.offsets.inputOffsetMs = 100;
+    clock.setTempo(0.75);
+    clock.start(0);
+    advance(3);
+    // An event 0.5 s ago: real 2500 ms at 0.75× is what songTime() showed then.
+    expect(timeline.shownSongTime(250 + 2500)).toBeCloseTo(1875, 9);
+    expect(timeline.judgeSongTime(250 + 2500)).toBeCloseTo(1800, 9);
+  });
+
   describe('judgeSongTimeNow', () => {
     it('judges a tap received now while the clock runs', () => {
       const { state, clock, timeline, advance } = world({ skewMs: 250 });

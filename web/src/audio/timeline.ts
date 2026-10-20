@@ -33,6 +33,12 @@ export interface Timeline {
    */
   judgeSongTime(eventTimeStamp: number): number;
   /**
+   * Song ms the stage was showing at this `event.timeStamp`: `songTime()` then, with
+   * no input offset. Where a finger landed on the board is read against it, never
+   * when the press counts (that is `judgeSongTime`).
+   */
+  shownSongTime(eventTimeStamp: number): number;
+  /**
    * Song ms at which a tap received right now would be judged: `judgeSongTime(now)`
    * while the clock runs. Once `pause()` stopped it, that value from the instant
    * before. Once something else stopped it, the held position less the input offset,
@@ -81,6 +87,9 @@ export function createTimeline({
       return highWater;
     },
     judgeSongTime,
+    shownSongTime(eventTimeStamp) {
+      return clock.songTimeAt(contextTimeAt(eventTimeStamp));
+    },
     judgeSongTimeNow() {
       if (clock.isRunning) return judgeSongTime(nowMs());
       if (held?.generation === clock.generation) return held.judgeMs;
