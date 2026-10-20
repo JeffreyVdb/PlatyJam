@@ -15,10 +15,26 @@ export function eventTime(timeStamp: number, now: number): number {
   return lag < 0 || lag > MAX_EVENT_LAG_MS ? now : timeStamp;
 }
 
+/**
+ * Tiles: where a finger landed on the lanes (`spotAtNdc` in scene/highway-layout.ts),
+ * in scroll windows along them, so it converts to song time whatever the layout: a
+ * tile at chart ms `t` is drawn at `along = (songMs − t) / windowMs`.
+ */
+export interface LaneSpot {
+  lane: number;
+  /** 0 at the hit line, growing towards the player: 1 is a whole scroll window. */
+  along: number;
+  /** How far either side of a tile a press still counts: half a head plus the slack. */
+  reach: number;
+}
+
 /** Where lane input goes. Times are `performance.now()`-based ms (event timestamps). */
 export interface LaneInputSink {
-  /** `input` names the finger (`p<pointerId>`) or key (`k<code>`) until its release. */
-  press(input: string, lane: number, timeStamp: number): void;
+  /**
+   * `input` names the finger (`p<pointerId>`) or key (`k<code>`) until its release.
+   * `spot` is where a finger landed along the lane (with `spotAt`); keys have none.
+   */
+  press(input: string, lane: number, timeStamp: number, spot?: LaneSpot): void;
   release(input: string, timeStamp: number): void;
   /** The system cancelled a held touch (a gesture, palm rejection, rotation). */
   cancel(): void;
@@ -35,6 +51,12 @@ export interface LaneInputOptions {
   win?: Window;
   /** The lane under a client point, or undefined off the lanes' play surface. */
   laneAt: (clientX: number, clientY: number) => number | undefined;
+  /**
+   * The lane and the place along it under a client point (the Tiles hit test). A
+   * finger's press uses the spot when there is one, and passes it on; otherwise
+   * `laneAt` decides (Rhythm, which has no use for one, returns none).
+   */
+  spotAt?: (clientX: number, clientY: number) => LaneSpot | undefined;
   /** Whether gameplay takes presses now. Presses made otherwise are never tracked. */
   accepting: () => boolean;
   sink: LaneInputSink;
@@ -63,6 +85,7 @@ export function installLaneInput({
   surface,
   win = window,
   laneAt,
+  spotAt,
   accepting,
   sink,
   now = () => performance.now(),
@@ -88,10 +111,11 @@ export function installLaneInput({
     if (event.pointerType === 'mouse' && event.button !== 0) return;
     const input = `p${event.pointerId}`;
     if (held.has(input) || !accepting()) return;
-    const lane = laneAt(event.clientX, event.clientY);
+    const spot = spotAt?.(event.clientX, event.clientY);
+    const lane = spot ? spot.lane : laneAt(event.clientX, event.clientY);
     if (lane === undefined) return;
     hold(input, lane);
-    sink.press(input, lane, eventTime(event.timeStamp, now()));
+    sink.press(input, lane, eventTime(event.timeStamp, now()), spot);
   };
 
   const onPointerUp = (event: PointerEvent) => {

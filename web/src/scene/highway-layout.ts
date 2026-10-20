@@ -1,5 +1,6 @@
 import { PerspectiveCamera, Plane, Raycaster, Vector2, Vector3 } from 'three';
 import { LANES } from '../chart/schema';
+import type { LaneSpot } from '../game/input';
 import { fitCamera, type CameraFit } from './camera-fit';
 import { laneForPoint, type HighwayBounds } from './lane-layout';
 
@@ -61,6 +62,12 @@ export interface HighwayLayout {
   direction: Vector3;
   /** Where a touch counts, beyond the drawn lanes: `halfWidth` and `slack` are lane units. */
   touch: HighwayBounds;
+  /**
+   * Tiles: how far beyond a tile's drawn head and body, along the lane, a press still
+   * lands on it (world units). Across the lane the whole lane counts: the gap between
+   * two tiles is smaller than a fingertip. Tune it on the iPad.
+   */
+  tileSlack: number;
 }
 
 export const HANDHELD: HighwayLayout = {
@@ -76,6 +83,8 @@ export const HANDHELD: HighwayLayout = {
   target: new Vector3(0, 0, -3.2),
   direction: new Vector3(0, 0.62, 0.78).normalize(),
   touch: { halfWidth: HIGHWAY_WIDTH / 2, slack: 0.15, far: 14, near: 1.6 + 1.2 },
+  // Most of a head again: far up the lane a tile is only a few px tall.
+  tileSlack: 0.35,
 };
 
 /** Elevation of the tabletop camera above the table, degrees. */
@@ -95,6 +104,7 @@ export const TABLETOP: HighwayLayout = {
   target: new Vector3(0, 0, -0.7),
   direction: new Vector3(0, Math.sin(TABLETOP_ELEVATION), Math.cos(TABLETOP_ELEVATION)),
   touch: { halfWidth: HIGHWAY_WIDTH / 2, slack: 0.1, far: 2.1, near: 2.4 },
+  tileSlack: 0.1,
 };
 
 /** The layout for a measured viewport. Decided by its shape, never by orientation events. */
@@ -174,4 +184,53 @@ export function laneAtNdc(
   raycaster.setFromCamera(pointer.set(x, y), camera);
   if (!raycaster.ray.intersectPlane(ground, hit)) return undefined;
   return laneForPoint(hit.x, hit.z, layout.touch);
+}
+
+/**
+ * The Tiles hit test: the lane and the place along it under a point of the screen
+ * (NDC), or undefined off the lanes. The pointer is cast into the lanes' plane, not
+ * at the tile meshes; the simulation finds the tile from the time. The touch area
+ * reaches beyond the far end by `reach`, since a tile appears there.
+ */
+export function spotAtNdc(
+  camera: PerspectiveCamera,
+  x: number,
+  y: number,
+  layout: HighwayLayout,
+): LaneSpot | undefined {
+  raycaster.setFromCamera(pointer.set(x, y), camera);
+  if (!raycaster.ray.intersectPlane(ground, hit)) return undefined;
+  const reach = layout.tileDepth / 2 + layout.tileSlack;
+  const { touch } = layout;
+  if (hit.z < -touch.far - reach) return undefined;
+  const lane = laneForPoint(hit.x, Math.max(hit.z, -touch.far), touch);
+  if (lane === undefined) return undefined;
+  return { lane, along: hit.z / layout.far, reach: reach / layout.far };
+}
+
+/**
+ * Tiles' exit line: world z past the hit line where a tile falls off. Handheld: the
+ * near end of the highway. Tabletop: the lanes already run off the bottom of the
+ * screen, so the bottom of the screen inside the safe area (it depends on the
+ * viewport, so call it after `frameLayout`).
+ */
+export function exitDepth(
+  camera: PerspectiveCamera,
+  layout: HighwayLayout,
+  height: number,
+  insets: Readonly<Insets> = NO_INSETS,
+): number {
+  if (layout.kind === 'handheld') return layout.near;
+  const bottom = -1 + (2 * insets.bottom) / Math.max(1, height);
+  raycaster.setFromCamera(pointer.set(0, bottom), camera);
+  if (!raycaster.ray.intersectPlane(ground, hit)) return layout.near;
+  return Math.min(layout.near, hit.z);
+}
+
+/**
+ * The exit line in scroll windows past the hit line, for the simulation: a head is
+ * lost once all of it has crossed the line at `exitZ`.
+ */
+export function exitAlong(layout: HighwayLayout, exitZ: number): number {
+  return (exitZ + layout.tileDepth / 2) / layout.far;
 }
