@@ -1360,7 +1360,7 @@ describe('game session', () => {
       expect(fake.piano.stopAll).toHaveBeenLastCalledWith(QUIT_FADE_MS);
     });
 
-    it('shakes a later tile instead of claiming it, and fails Classic on the water', async () => {
+    it('shakes a later tile instead of claiming it, and fails Classic on empty space', async () => {
       await loadTiles([tap(500, 0), tap(900, 1)]);
       const notYet: unknown[] = [];
       session.events.on('notyet', (event) => notYet.push(event));
@@ -1595,7 +1595,7 @@ describe('game session', () => {
         await loadTiles([tap(500, 0), tap(2500, 1)]);
         session.start();
         frames(1600);
-        touch('a', 2, { lane: 2, along: 0.9, reach: 0.01 }); // the water
+        touch('a', 2, { lane: 2, along: 0.9, reach: 0.01 }); // empty space
         expect(session.state).toBe('failing');
         expect(played()).toEqual(['miss']);
         expect(fake.effects.stopFills).toHaveBeenLastCalledWith(FAIL_FADE_MS);

@@ -1111,7 +1111,7 @@ describe('menus', () => {
         ).toEqual([
           'Tap the lowest tile first, anywhere on it. The next one is tinted.',
           'Hold long tiles until they fill up.',
-          "A tile that shakes isn't next yet. Don't let one fall off, or tap the water.",
+          "A tile that shakes isn't next yet. Don't let one fall off, or tap empty space.",
         ]);
         expect(intro()?.querySelector('.preview--tiles')).not.toBeNull();
         expect(q('.screen--songs').inert).toBe(true);

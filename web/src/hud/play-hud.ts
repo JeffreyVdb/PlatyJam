@@ -7,6 +7,11 @@ import { prefersReducedMotion } from './motion';
  * The HUD during a run: score, song progress with its star marks, the combo, the
  * judgment of each hit, and the pause button. Values are written only when they
  * change, so a frame costs a few comparisons.
+ *
+ * It lays itself out for the game (`data-game`, style.css): Rhythm's keeps to the
+ * corner and the hit line; Tiles' runs the progress along the very top, with a big
+ * score centred under it and the judgment and combo below, over the lanes. Only the
+ * pause button takes touches: tiles under the rest can be tapped.
  */
 export interface PlayHud {
   /** Call every frame. */
@@ -97,6 +102,7 @@ export function createPlayHud(root: HTMLElement, session: GameSession): PlayHud 
   let shownStars = -1;
 
   const onState = ({ state }: { state: SessionState }) => {
+    hud.dataset.game = session.config?.mode ?? 'rhythm';
     const visible = PLAYING_STATES.includes(state) || state === 'finished';
     hud.hidden = !visible;
     root.classList.toggle('is-playing', visible);

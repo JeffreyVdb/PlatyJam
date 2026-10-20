@@ -119,16 +119,16 @@ const LILY = new Color('#f7a8d8');
 /** Tiles' "black" tiles: ink darker than the deepest water, so they read on the lanes. */
 const INK = new Color('#06141d');
 /** The tile, or both tiles of a double, to claim next. */
-const INK_NEXT = INK.clone().lerp(LILY, 0.2);
+const INK_NEXT = new Color('#211a2b');
 /** A long tile claimed, the part its fill has not reached yet. */
-const INK_CLAIMED = INK.clone().lerp(LILY, 0.12);
+const INK_CLAIMED = INK;
 /** A long tile's centre line and dot, while it waits. */
 const INK_MARK = INK.clone().lerp(FOAM, 0.28);
 /** A claimed tile riding off: added to what is under it, so it reads as translucent white. */
-const GHOST = new Color(0.2, 0.2, 0.2);
+const GHOST = new Color(0.05, 0.05, 0.05);
 /** The flat backdrop: river at the top, lighter water below, a lily glow at the bottom. */
-const BACKDROP_TOP = RIVER_RAISED.clone().lerp(RIVER_DEEP, 0.15);
-const BACKDROP_BOTTOM = RIVER_RAISED.clone().lerp(RIPPLE, 0.32);
+const BACKDROP_TOP = RIVER.clone().lerp(RIVER_RAISED, 0.5);
+const BACKDROP_BOTTOM = new Color('#2f7d8c');
 
 const MAX_TILES = 160;
 const MAX_HOLD_SEGMENTS = 32;
@@ -274,7 +274,7 @@ void main() {
   float down = 1.0 - vUv.y;
   vec3 colour = mix(uTop, uBottom, smoothstep(0.0, 1.0, down));
   vec2 glow = (px - vec2(0.5 * uSize.x, 1.08 * uSize.y)) / max(uSize.x, uSize.y);
-  colour += uGlow * 0.2 * exp(-dot(glow, glow) * 4.0);
+  colour += uGlow * 0.07 * exp(-dot(glow, glow) * 5.0);
   float fromLine = abs(px.y - uLine * uSize.y);
   colour += vec3(0.07 * exp(-fromLine * fromLine / 450.0) + 0.16 * exp(-fromLine * fromLine / 2.0));
   vec2 cell = vec2(px.x, px.y + uTime * 12.0) / 64.0;
