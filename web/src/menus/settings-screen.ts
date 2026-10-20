@@ -112,10 +112,11 @@ export function createSettingsScreen(options: SettingsScreenOptions): SettingsSc
     },
   });
 
-  const volume = (kind: VolumeKind, label: string) =>
+  const volume = (kind: VolumeKind, label: string, describedBy?: string) =>
     slider({
       label,
       value: initial[kind],
+      describedBy,
       onInput: (value) => {
         options.onVolume(kind, value);
       },
@@ -130,12 +131,13 @@ export function createSettingsScreen(options: SettingsScreenOptions): SettingsSc
     'settings-hint',
     'The notes PlatyJam plays along with you. Your own notes follow Volume.',
   );
-  const effects = volume('effectsVolume', 'Effects');
   const effectsHint = el(
     'p',
     'settings-hint',
     'The taps, sparkles and misses in Tiles. Rhythm plays none.',
   );
+  effectsHint.id = uid('effects-hint');
+  const effects = volume('effectsVolume', 'Effects', effectsHint.id);
 
   const outputLatency = el('p', 'settings-hint');
   const mutedHint = el('p', 'settings-hint');
