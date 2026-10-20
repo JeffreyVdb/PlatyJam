@@ -612,6 +612,24 @@ describe('menus', () => {
     expect(store.settings).toMatchObject({ failMode: 'relaxed', scrollDurationMs: 950 });
   });
 
+  it('applies the Effects volume at once and saves it, apart from the others', () => {
+    const { session, store, setVolume } = setup();
+    toSongs(session);
+    tap(buttonNamed('Settings'));
+    expect(q('.screen--settings').textContent).toContain('The taps, sparkles and misses in Tiles.');
+    const effects = [...root.querySelectorAll<HTMLElement>('[role="slider"]')].find(
+      (node) => node.getAttribute('aria-valuetext') === '70%',
+    );
+    expect(effects).toBeDefined();
+    effects?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    expect(setVolume).toHaveBeenLastCalledWith('effectsVolume', 0.75);
+    expect(store.settings).toMatchObject({
+      effectsVolume: 0.75,
+      masterVolume: 1,
+      accompanimentVolume: 1,
+    });
+  });
+
   it('opens the calibration from Settings, and comes back to Settings when it closes', () => {
     const { session, openCalibration, closeCalibration } = setup();
     toSongs(session);

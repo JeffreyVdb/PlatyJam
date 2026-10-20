@@ -132,9 +132,10 @@ function startGame(
   session.attachInput(input);
   scene.setLaneHeld((lane) => input.isLaneHeld(lane));
 
-  const { masterVolume, accompanimentVolume } = store.settings;
+  const { masterVolume, accompanimentVolume, effectsVolume } = store.settings;
   audio.engine.setMasterVolume(masterVolume);
   audio.setAccompanimentVolume(accompanimentVolume);
+  audio.setEffectsVolume(effectsVolume);
 
   let warnedSamples = false;
   session.events.on('statechange', ({ state }) => {
@@ -166,7 +167,8 @@ function startGame(
     charts,
     setVolume: (kind, volume) => {
       if (kind === 'masterVolume') audio.engine.setMasterVolume(volume);
-      else audio.setAccompanimentVolume(volume);
+      else if (kind === 'accompanimentVolume') audio.setAccompanimentVolume(volume);
+      else audio.setEffectsVolume(volume);
     },
     offsets: () => audio.engine.offsets,
     openCalibration: calibrate,

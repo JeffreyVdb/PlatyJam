@@ -56,6 +56,7 @@ describe('parseSave', () => {
         failMode: 'relaxed' as const,
         tempo: 1.25 as const,
         masterVolume: 0.4,
+        effectsVolume: 0.25,
         songId: 'fur-elise',
         difficulty: 'hard' as const,
         latencyWarningMutedAtMs: 187,
@@ -109,6 +110,32 @@ describe('parseSave', () => {
     for (const bad of [-1, Number.NaN, 1e9, '187', true, undefined, null]) {
       expect(read(bad)).toBeNull();
     }
+  });
+
+  it('keeps a saved effects volume, and reads anything else as the default', () => {
+    const read = (value: unknown) =>
+      parseSave({ version: 2, settings: { effectsVolume: value } }).settings.effectsVolume;
+    expect(DEFAULT_SETTINGS.effectsVolume).toBe(0.7);
+    expect(read(0)).toBe(0);
+    expect(read(0.35)).toBe(0.35);
+    expect(read(1)).toBe(1);
+    for (const bad of [-0.1, 1.01, Number.NaN, Infinity, '0.5', true, null, undefined]) {
+      expect(read(bad)).toBe(0.7);
+    }
+  });
+
+  it('loads a save written before the effects, at the default effects volume', () => {
+    const { settings } = parseSave({
+      version: 2,
+      settings: { gameMode: 'tiles', masterVolume: 0.5, accompanimentVolume: 0.3 },
+    });
+    expect(settings).toEqual({
+      ...DEFAULT_SETTINGS,
+      gameMode: 'tiles',
+      masterVolume: 0.5,
+      accompanimentVolume: 0.3,
+    });
+    expect(settings.effectsVolume).toBe(0.7);
   });
 
   it('loads a save written before the latency warning, asking by default', () => {
@@ -168,6 +195,8 @@ describe('parseSave', () => {
           ...v1.settings,
           gameMode: 'rhythm',
           seenIntro: { rhythm: false, tiles: false },
+          // Version 1 had no effects: the default.
+          effectsVolume: 0.7,
         },
         bests: {
           'rhythm/fur-elise/normal/1': best(),
