@@ -1,5 +1,5 @@
 import type { InstancedMesh, Object3D, WebGLRenderer } from 'three';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
 import { createEventBus } from '../app/events';
 import { createLifecycle, type Lifecycle } from '../app/lifecycle';
 import type { AudioEngineEvents, EnginePhase } from '../audio/engine';
@@ -120,6 +120,20 @@ function fakeAudio() {
     stopAll: vi.fn(),
   };
   const setTuning = vi.fn();
+  /** Tiles' effects; each fill is kept, with its own `stop`. */
+  const fills: { durationS: number; options?: { when?: number; offsetS?: number }; stop: Mock }[] =
+    [];
+  const effects = {
+    play: vi.fn(),
+    fill: vi.fn((durationS: number, options?: { when?: number; offsetS?: number }) => {
+      const fill = { durationS, options, stop: vi.fn() };
+      fills.push(fill);
+      return fill;
+    }),
+    prepare: vi.fn(),
+    stopFills: vi.fn(),
+    stopAll: vi.fn(),
+  };
   let finishSamples: (samples: { failed: number[] }) => void = () => undefined;
   const samples = {
     progress: { loaded: 0, failed: 0, total: 88 },
@@ -132,6 +146,7 @@ function fakeAudio() {
     piano,
     accompaniment,
     backing,
+    effects,
     setTuning,
     samples,
   } as unknown as SessionAudio;
@@ -142,6 +157,8 @@ function fakeAudio() {
     voices,
     accompaniment,
     backing,
+    effects,
+    fills,
     setTuning,
     backingControl,
     releaseBacking: () => {
@@ -1425,6 +1442,137 @@ describe('game session', () => {
           expect(failure()).toEqual({ kind: 'emptyTap', lane: 0 });
           expect(session.stats()).toMatchObject({ clear: 2, miss: 1 });
         });
+      });
+    });
+
+    describe('sound effects', () => {
+      const played = () => fake.effects.play.mock.calls.map(([effect]) => effect as string);
+
+      it('renders them as the song loads, so the first tap does not wait', async () => {
+        await loadTiles([tap(500, 0)]);
+        expect(fake.effects.prepare).toHaveBeenCalledTimes(1);
+      });
+
+      it('knocks and sparkles a tap tile in the tap itself, while its note waits', async () => {
+        await loadTiles([tap(500, 0), tap(900, 1)]);
+        session.start();
+        frames(800); // song -200
+        touch('a', 0, on(500));
+        // No frame in between: the effect starts inside the input handler.
+        expect(played()).toEqual(['tap', 'clear']);
+        expect(noteOns()).toEqual([[60, 100, fake.engine.timeline.startTimeFor(500)]]);
+      });
+
+      it('fills a long tile claimed early from its beat, and sparkles when it is full', async () => {
+        await loadTiles([hold(500, 2, 400), tap(3000, 1)]);
+        session.start();
+        frames(800); // song -200
+        touch('a', 2, on(500));
+        expect(played()).toEqual(['tap']);
+        expect(fake.fills).toHaveLength(1);
+        expect(fake.fills[0]?.durationS).toBeCloseTo(0.4, 9);
+        expect(fake.fills[0]?.options).toEqual({ when: fake.engine.timeline.startTimeFor(500) });
+        frames(1100 + FINALIZE_GRACE_MS + 32); // past 900, when it is full
+        expect(played()).toEqual(['tap', 'complete']);
+        expect(fake.fills[0]?.stop).toHaveBeenCalled();
+      });
+
+      it('fills a long tile claimed late from now, for as long as it fills', async () => {
+        await loadTiles([hold(500, 2, 2000), tap(4000, 1)]);
+        session.start();
+        frames(1600); // song 600
+        touch('a', 2, on(500));
+        // Claimed late: its note, and its fill, start now and last its `dur`.
+        expect(fake.fills[0]?.durationS).toBeCloseTo(2, 6);
+        expect(fake.fills[0]?.options).toEqual({ offsetS: 0 });
+      });
+
+      it('thuds when a long tile is let go early, and ends its fill', async () => {
+        await loadTiles([hold(500, 2, 400), tap(3000, 1)], { failMode: 'relaxed' });
+        session.start();
+        frames(1600); // song 600
+        touch('a', 2, on(500));
+        frames(100);
+        release('a');
+        expect(played()).toEqual(['tap', 'miss']);
+        expect(fake.fills[0]?.stop).toHaveBeenCalled();
+      });
+
+      it('lets a Classic failure’s thud ring as the song falls silent', async () => {
+        await loadTiles([tap(500, 0), tap(2500, 1)]);
+        session.start();
+        frames(1600);
+        touch('a', 2, { lane: 2, along: 0.9, reach: 0.01 }); // the water
+        expect(session.state).toBe('failing');
+        expect(played()).toEqual(['miss']);
+        expect(fake.effects.stopFills).toHaveBeenLastCalledWith(FAIL_FADE_MS);
+        expect(fake.effects.stopAll).not.toHaveBeenCalled();
+      });
+
+      it('plays nothing for a "not yet" shake', async () => {
+        await loadTiles([tap(500, 0), tap(900, 1)]);
+        session.start();
+        frames(800);
+        touch('a', 1, on(900));
+        expect(played()).toEqual([]);
+      });
+
+      it('falls silent on pause and plays nothing until the run goes on', async () => {
+        await loadTiles([tap(500, 0), tap(900, 1)]);
+        session.start();
+        frames(1600);
+        session.pause();
+        expect(fake.effects.stopAll).toHaveBeenLastCalledWith(PAUSE_FADE_MS);
+        touch('a', 0, on(500));
+        await vi.advanceTimersByTimeAsync(COUNTDOWN_BEAT_MS);
+        expect(played()).toEqual([]);
+      });
+
+      it('stops a fill on pause, and picks it up again only if the long tile is held again', async () => {
+        for (const reclaim of [true, false]) {
+          fake.fills.length = 0;
+          fake.effects.play.mockClear();
+          await loadTiles([hold(500, 2, 1000), tap(4000, 1)], { failMode: 'relaxed' });
+          session.start();
+          frames(1600); // song 600
+          touch('a', 2, on(500));
+          frames(200); // about 0.2 s into a 1 s fill
+          session.pause();
+          const into = (songMs() - 600) / 1000;
+          expect(fake.effects.stopAll).toHaveBeenLastCalledWith(PAUSE_FADE_MS);
+          session.resume();
+          if (reclaim) press('b', 2);
+          await vi.advanceTimersByTimeAsync(COUNTDOWN_BEAT_MS * 3);
+          if (reclaim) {
+            expect(fake.fills).toHaveLength(2);
+            expect(fake.fills[1]?.durationS).toBeCloseTo(1, 6);
+            expect(fake.fills[1]?.options?.offsetS).toBeCloseTo(into, 6);
+            expect(played()).toEqual(['tap']);
+          } else {
+            expect(fake.fills).toHaveLength(1);
+            expect(played()).toEqual(['tap', 'miss']);
+          }
+          session.quit();
+          expect(fake.effects.stopAll).toHaveBeenLastCalledWith(QUIT_FADE_MS);
+        }
+      });
+
+      it('plays none in Rhythm: its tap is the note', async () => {
+        await loaded([tap(500, 0), hold(1000, 1, 400), tap(2000, 2)], { failMode: 'relaxed' });
+        session.start();
+        frames(1500); // song 500
+        press('a', 0);
+        release('a');
+        frames(500); // song 1000
+        press('b', 1);
+        frames(400);
+        release('b');
+        press('c', 3); // an empty lane
+        frames(1500); // the last tile passes unhit
+        expect(session.stats()).toMatchObject({ miss: 2 });
+        expect(fake.effects.prepare).not.toHaveBeenCalled();
+        expect(fake.effects.play).not.toHaveBeenCalled();
+        expect(fake.effects.fill).not.toHaveBeenCalled();
       });
     });
   });
