@@ -1,4 +1,4 @@
-import { STAR_THRESHOLDS } from '../game/scoring';
+import { judgmentName, STAR_THRESHOLDS } from '../game/scoring';
 import type { GameSession, JudgmentEvent, SessionState } from '../game/session-contract';
 import { starIcon } from './icons';
 import { prefersReducedMotion } from './motion';
@@ -15,7 +15,6 @@ export interface PlayHud {
   dispose(): void;
 }
 
-const JUDGMENT_TEXT = { perfect: 'Perfect', good: 'Good', miss: 'Miss' } as const;
 /** Combos below this are not worth showing. */
 const COMBO_SHOWN_FROM = 3;
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -141,7 +140,7 @@ export function createPlayHud(root: HTMLElement, session: GameSession): PlayHud 
 
     onJudgment(event) {
       if (event.unit === 'tail' && event.judgment !== 'miss') return;
-      judgment.textContent = JUDGMENT_TEXT[event.judgment];
+      judgment.textContent = judgmentName(session.config?.mode ?? 'rhythm', event.judgment);
       judgment.dataset.judgment = event.judgment;
       // Restart the pop on every hit, even the same word twice.
       judgment.getAnimations().forEach((animation) => {

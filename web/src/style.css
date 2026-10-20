@@ -911,6 +911,10 @@ body {
   color: var(--ripple);
 }
 
+.play-judgment[data-judgment='clear'] {
+  color: var(--game-tiles);
+}
+
 .play-judgment[data-judgment='miss'] {
   color: var(--snag);
 }

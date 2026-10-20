@@ -5,8 +5,8 @@ import type { AudioEngine } from '../audio/engine';
 import type { LoadProgress, PianoSamples } from '../audio/piano-samples';
 import type { PianoVoice, Sampler } from '../audio/sampler';
 import { type Accompaniment, PAUSE_FADE_MS } from '../audio/scheduler';
-import type { Chart, DifficultyName } from '../chart/schema';
-import type { LaneInputSink } from './input';
+import type { Chart, DifficultyName, Tile } from '../chart/schema';
+import type { LaneInputSink, LaneSpot } from './input';
 import { accuracyOf, earnsPerfectBadge, starsFor } from './scoring';
 import type {
   AudioRecovery,
@@ -22,7 +22,15 @@ import type {
   SessionEvents,
   SessionState,
 } from './session-contract';
-import { createSimulation, finalizationHorizon, type Simulation } from './simulation';
+import {
+  createSimulation,
+  finalizationHorizon,
+  type Simulation,
+  type SimulationOptions,
+  TAIL,
+  type TileAim,
+} from './simulation';
+import { createTilesSimulation, DEFAULT_EXIT_ALONG } from './tiles-simulation';
 
 // Tunable presentation and audio timings.
 
@@ -90,6 +98,12 @@ export interface GameplaySession extends GameSession {
   acceptsInput(): boolean;
   /** The input layer, so pausing can forget held fingers and keys. */
   attachInput(input: { clear(): void }): void;
+  /**
+   * Tiles: where the stage's layout loses a tile, in scroll windows past the hit line
+   * (`exitAlong` in scene/highway-layout.ts). Call it whenever the stage is resized:
+   * the layout, and on the tabletop the screen's bottom edge, decide it.
+   */
+  setExitAlong(along: number): void;
   /** Call every render frame: finalizes misses and completions, runs transitions. */
   update(): void;
   /** Call after `update()` to get what to draw. */
@@ -132,6 +146,12 @@ export function createGameplaySession({
   let timer: ReturnType<typeof setTimeout> | undefined;
   /** Voices of the hold being held, per tile index. */
   const holdVoices = new Map<number, PianoVoice[]>();
+  /**
+   * Tiles: tiles claimed before their beat, whose notes wait on the song clock, with
+   * the context time each is due. A pause cancels them; resuming schedules them again.
+   */
+  const waiting = new Map<number, number>();
+  let exitAlong = DEFAULT_EXIT_ALONG;
   /** The furthest progress this run has reached; a failure never takes it back. */
   let furthest = 0;
   /** When the run failed (performance ms) and the song time shown then, for the rewind. */
@@ -144,6 +164,7 @@ export function createGameplaySession({
     maxCombo: 0,
     perfect: 0,
     good: 0,
+    clear: 0,
     miss: 0,
     accuracy: 0,
     progress: 0,
@@ -164,39 +185,77 @@ export function createGameplaySession({
 
   const tiles = () => (config ? config.chart.difficulties[config.difficulty].tiles : []);
 
+  /** Plays a hit tile's note: now, or at context time `at`. */
+  const strike = (index: number, tile: Tile, at?: number) => {
+    const voices: PianoVoice[] = [];
+    for (const pitch of tile.pitches) {
+      const voice =
+        at === undefined ? piano.noteOn(pitch, tile.vel) : piano.noteOn(pitch, tile.vel, at);
+      if (voice) voices.push(voice);
+    }
+    if (tile.dur === undefined) {
+      const off = (at ?? engine.context.currentTime) + TAP_NOTE_S;
+      for (const voice of voices) piano.noteOff(voice, off);
+    } else {
+      holdVoices.set(index, voices);
+    }
+  };
+
+  /** Schedules a waiting Tiles note on the song clock, like the accompaniment. */
+  const strikeOnBeat = (index: number, tile: Tile) => {
+    const startMs = sim?.noteStartMs[index] ?? tile.t;
+    // Calibrated as all scheduled sound is: it is heard on its beat.
+    const at = engine.timeline.startTimeFor(startMs);
+    waiting.set(index, at);
+    strike(index, tile, at);
+  };
+
   const onJudgment = (event: Readonly<JudgmentEvent>) => {
     const tile = tiles()[event.tileIndex];
     if (tile && event.judgment !== 'miss' && (event.unit === 'tap' || event.unit === 'head')) {
-      const voices: PianoVoice[] = [];
-      for (const pitch of tile.pitches) {
-        const voice = piano.noteOn(pitch, tile.vel);
-        if (voice) voices.push(voice);
-      }
-      if (event.unit === 'tap') {
-        const off = engine.context.currentTime + TAP_NOTE_S;
-        for (const voice of voices) piano.noteOff(voice, off);
-      } else {
-        holdVoices.set(event.tileIndex, voices);
-      }
+      // Tiles: a tile claimed before its beat waits for it (`TILES_RULES.melody`).
+      // Rhythm's notes start at the hit.
+      const startMs = sim?.noteStartMs[event.tileIndex] ?? event.songMs;
+      if (startMs > event.songMs) strikeOnBeat(event.tileIndex, tile);
+      else strike(event.tileIndex, tile);
     }
     if (event.unit === 'tail') {
       for (const voice of holdVoices.get(event.tileIndex) ?? []) piano.noteOff(voice);
       holdVoices.delete(event.tileIndex);
+      waiting.delete(event.tileIndex);
     }
     events.emit('judgment', { ...event });
   };
 
   const newSimulation = () => {
     holdVoices.clear();
+    waiting.clear();
     furthest = 0;
     if (!config) return undefined;
-    return createSimulation({
+    const options: SimulationOptions = {
       tiles: tiles(),
       tempo: config.tempo,
       failMode: config.failMode,
       durationMs: config.chart.durationMs,
       onJudgment,
+    };
+    // The game picks the rules.
+    if (config.mode === 'rhythm') return createSimulation(options);
+    return createTilesSimulation({
+      ...options,
+      scrollDurationMs: config.scrollDurationMs,
+      exitAlong,
+      onNotYet: (lane, tileIndex) => {
+        events.emit('notyet', { lane, tileIndex });
+      },
     });
+  };
+
+  /** Tiles: where a finger landed, as the chart ms of a tile drawn there, at `songMs`. */
+  const aimOf = (spot: LaneSpot, songMs: number): TileAim | undefined => {
+    if (config?.mode !== 'tiles') return undefined;
+    const windowMs = config.scrollDurationMs * config.tempo;
+    return { ms: songMs - spot.along * windowMs, reachMs: spot.reach * windowMs };
   };
 
   const progressAt = (songMs: number) =>
@@ -233,6 +292,7 @@ export function createGameplaySession({
     // Notes struck outside a run (the ?debug tap pad) are in concert pitch.
     audio.setTuning(1);
     holdVoices.clear();
+    waiting.clear();
   };
 
   /** Runs state transitions the simulation calls for. */
@@ -266,7 +326,21 @@ export function createGameplaySession({
     }
   };
 
-  const judgeTime = (timeStamp: number) => engine.timeline.judgeSongTime(timeStamp);
+  /**
+   * The song ms an input at `timeStamp` counts at. Rhythm judges timing, so it is
+   * calibrated (`judgeSongTime`). Tiles has no timing to judge: a tile can be claimed
+   * while it is shown, so its presses, releases and finalization all go by the board
+   * as shown at the event (`shownSongTime`), and the input calibration plays no part.
+   */
+  const inputTime = (timeStamp: number) =>
+    config?.mode === 'tiles'
+      ? engine.timeline.shownSongTime(timeStamp)
+      : engine.timeline.judgeSongTime(timeStamp);
+  /** `inputTime` for an input received right now, also once the clock has stopped. */
+  const inputTimeNow = () =>
+    config?.mode === 'tiles'
+      ? engine.timeline.shownSongTimeNow()
+      : engine.timeline.judgeSongTimeNow();
 
   // ---- start ----
 
@@ -333,9 +407,9 @@ export function createGameplaySession({
   const enterPause = (reason: PauseReason) => {
     if (!sim) return;
     clearTimer();
-    // In input time, as inputs are judged: read before the clock stops, or from the
-    // value the timeline kept when the audio already stopped it.
-    const settledUpTo = engine.timeline.judgeSongTimeNow();
+    // In input time, as inputs count: read before the clock stops, or from the value
+    // the timeline kept when the audio already stopped it.
+    const settledUpTo = inputTimeNow();
     engine.clock.pause();
     if (isPlaying()) {
       // Settle what is already decided at the pause, before anything is suspended:
@@ -351,6 +425,10 @@ export function createGameplaySession({
     backing.pause(PAUSE_FADE_MS);
     piano.stopAll(PAUSE_FADE_MS);
     holdVoices.clear();
+    // Tiles notes still waiting for their beat were cancelled with the rest; they are
+    // scheduled again on resume. Those already sounding are done.
+    const ctxNow = engine.context.currentTime;
+    for (const [index, at] of waiting) if (at <= ctxNow) waiting.delete(index);
     sim.pause();
     input?.clear();
     countdown = undefined;
@@ -403,7 +481,21 @@ export function createGameplaySession({
     if (state !== 'countdown') return;
     countdown = undefined;
     engine.resumeClock();
+    resumeWaitingNotes();
     setState(engine.clock.position() < 0 ? 'leadIn' : 'playing');
+  };
+
+  /** Tiles: schedules again the notes a pause cancelled, for taps and reclaimed holds. */
+  const resumeWaitingNotes = () => {
+    if (!sim || waiting.size === 0) return;
+    const current = sim;
+    const all = tiles();
+    for (const index of [...waiting.keys()]) {
+      const tile = all[index];
+      const sounds = tile && (tile.dur === undefined || current.tails[index] === TAIL.holding);
+      if (sounds && engine.clock.isRunning) strikeOnBeat(index, tile);
+      else waiting.delete(index);
+    }
   };
 
   // ---- quitting ----
@@ -453,14 +545,16 @@ export function createGameplaySession({
   const isPlaying = () => state === 'leadIn' || state === 'playing';
 
   const sink: LaneInputSink = {
-    press(id, lane, timeStamp) {
+    press(id, lane, timeStamp, spot) {
       if (!sim) return;
       if (state === 'countdown') {
         if (sim.reclaim(id, lane)) emitCountdown();
         return;
       }
       if (!isPlaying()) return;
-      sim.press(id, lane, judgeTime(timeStamp));
+      // Tiles: the tile under the finger is the one drawn there when it landed.
+      const songMs = inputTime(timeStamp);
+      sim.press(id, lane, songMs, spot && aimOf(spot, songMs));
       afterSimulation();
     },
     release(id, timeStamp) {
@@ -471,7 +565,7 @@ export function createGameplaySession({
         return;
       }
       if (!isPlaying()) return;
-      sim.release(id, judgeTime(timeStamp));
+      sim.release(id, inputTime(timeStamp));
       afterSimulation();
     },
     cancel() {
@@ -518,6 +612,7 @@ export function createGameplaySession({
       live.maxCombo = score?.maxCombo ?? 0;
       live.perfect = score?.perfect ?? 0;
       live.good = score?.good ?? 0;
+      live.clear = score?.clear ?? 0;
       live.miss = score?.miss ?? 0;
       live.accuracy = score ? accuracyOf(score) : 0;
       if (results) {
@@ -563,7 +658,7 @@ export function createGameplaySession({
             setState('error');
             return;
           }
-          // Tiles has no rules of its own yet (PLA-14): every mode plays Rhythm.
+          // `mode` picks the rules: see `newSimulation`.
           config = { ...rest, chart: loaded };
           sim = newSimulation();
           setState('ready');
@@ -615,11 +710,15 @@ export function createGameplaySession({
     attachInput(next) {
       input = next;
     },
+    setExitAlong(along) {
+      exitAlong = along;
+      sim?.setExitAlong(along);
+    },
 
     update() {
       if (!sim || !config || !isPlaying()) return;
       reach(engine.timeline.songTime());
-      const horizon = finalizationHorizon(judgeTime(now()), config.tempo);
+      const horizon = finalizationHorizon(inputTime(now()), config.tempo);
       sim.advance(horizon);
       afterSimulation();
       if (state === 'leadIn' && engine.clock.position() >= 0) setState('playing');

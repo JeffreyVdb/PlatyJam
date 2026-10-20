@@ -1,3 +1,4 @@
+import { MODE_JUDGMENTS } from '../game/scoring';
 import type {
   FinalResults,
   GameMode,
@@ -180,7 +181,9 @@ export interface ResultsScreen extends Screen {
 
 function resultHeading(results: FinalResults): string {
   if (results.outcome === 'cleared') return results.perfectBadge ? 'Perfect run' : 'Song cleared';
-  return results.failure?.kind === 'emptyTap' ? 'That lane was empty' : 'A note got away';
+  const empty = results.failure?.kind === 'emptyTap';
+  if (results.mode === 'tiles') return empty ? 'That was the water' : 'A tile got away';
+  return empty ? 'That lane was empty' : 'A note got away';
 }
 
 /** Cleared or failed, score, stars, the counts, "New best!", then Retry or Song list. */
@@ -241,9 +244,11 @@ export function createResultsScreen({
       const rows: [string, string][] = [
         ['Accuracy', `${results.accuracy.toFixed(1)}%`],
         ['Max combo', String(results.maxCombo)],
-        ['Perfect', String(results.perfect)],
-        ['Good', String(results.good)],
-        ['Miss', String(results.miss)],
+        // The game's own judgments: Perfect, Good and Miss, or Cleared and Missed.
+        ...MODE_JUDGMENTS[results.mode].map(({ judgment, name }): [string, string] => [
+          name,
+          String(results[judgment] ?? 0),
+        ]),
       ];
       stats.replaceChildren(
         ...rows.map(([label, value]) => {

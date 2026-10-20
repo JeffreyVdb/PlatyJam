@@ -33,6 +33,12 @@ export interface Timeline {
    */
   judgeSongTime(eventTimeStamp: number): number;
   /**
+   * Song ms the stage was showing at this `event.timeStamp`: `songTime()` then, with
+   * no input offset. Where a finger landed on the board is read against it, never
+   * when the press counts (that is `judgeSongTime`).
+   */
+  shownSongTime(eventTimeStamp: number): number;
+  /**
    * Song ms at which a tap received right now would be judged: `judgeSongTime(now)`
    * while the clock runs. Once `pause()` stopped it, that value from the instant
    * before. Once something else stopped it, the held position less the input offset,
@@ -40,7 +46,16 @@ export interface Timeline {
    * held position then, and the output mapping is lost).
    */
   judgeSongTimeNow(): number;
-  /** Pauses the clock, keeping what `judgeSongTimeNow()` read just before for this pause. */
+  /**
+   * `shownSongTime` for an event received right now, as `judgeSongTimeNow` is for
+   * `judgeSongTime`: once `pause()` stopped the clock, the value from the instant
+   * before; once something else stopped it, the held position.
+   */
+  shownSongTimeNow(): number;
+  /**
+   * Pauses the clock, keeping what `judgeSongTimeNow()` and `shownSongTimeNow()` read
+   * just before for this pause.
+   */
   pause(): void;
   /** Context seconds to start a sound so it is heard at song ms `songMs`. Needs a running clock. */
   startTimeFor(songMs: number): number;
@@ -63,11 +78,13 @@ export function createTimeline({
 }: TimelineOptions): Timeline {
   let highWater = -Infinity;
   let generation = -1;
-  // `judgeSongTimeNow()` as `pause()` stopped the clock, valid while it stays stopped.
-  let held: { generation: number; judgeMs: number } | undefined;
+  // `judgeSongTimeNow()` and `shownSongTimeNow()` as `pause()` stopped the clock, valid
+  // while it stays stopped.
+  let held: { generation: number; judgeMs: number; shownMs: number } | undefined;
 
   const judgeSongTime = (eventTimeStamp: number) =>
     clock.songTimeAt(contextTimeAt(eventTimeStamp - offsets().inputOffsetMs));
+  const shownSongTime = (eventTimeStamp: number) => clock.songTimeAt(contextTimeAt(eventTimeStamp));
 
   return {
     clock,
@@ -81,16 +98,24 @@ export function createTimeline({
       return highWater;
     },
     judgeSongTime,
+    shownSongTime,
     judgeSongTimeNow() {
       if (clock.isRunning) return judgeSongTime(nowMs());
       if (held?.generation === clock.generation) return held.judgeMs;
       return clock.position() - offsets().inputOffsetMs * clock.tempo;
     },
+    shownSongTimeNow() {
+      if (clock.isRunning) return shownSongTime(nowMs());
+      if (held?.generation === clock.generation) return held.shownMs;
+      return clock.position();
+    },
     pause() {
       if (!clock.isRunning) return;
-      const judgeMs = judgeSongTime(nowMs());
+      const at = nowMs();
+      const judgeMs = judgeSongTime(at);
+      const shownMs = shownSongTime(at);
       clock.pause();
-      held = { generation: clock.generation, judgeMs };
+      held = { generation: clock.generation, judgeMs, shownMs };
     },
     startTimeFor(songMs) {
       return clock.ctxTimeFor(songMs) - offsets().audioOffsetMs / 1000;

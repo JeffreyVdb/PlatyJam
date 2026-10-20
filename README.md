@@ -9,6 +9,7 @@ PlatyJam is a musical rhythm game planned for the browser. Follow the beat, hit 
 - Hold sustained tiles for their full duration to carry longer notes.
 - Chain accurate hits to build combos and earn higher scores.
 - Missed notes break your streak, while faster and more complex patterns increase the challenge.
+- Or play **Tiles** on the same songs: tap every tile, anywhere on it, before it falls off the screen. Timing doesn't matter; the order does.
 
 ## Planned technology
 
@@ -96,7 +97,7 @@ Everything under `web/src/audio/`. The pure maths has no Web Audio imports and i
 | `engine.ts`         | Owns the one `AudioContext` and master gain (with the master volume): unlock, `audioSession`, interruptions, recreation, the song clock                                                                   |
 | `clock.ts`          | The song clock: context time to song time, with start offset, pause, resume and tempo                                                                                                                     |
 | `output-time.ts`    | Maps a `performance.now()` time (an `event.timeStamp`) to context time with `getOutputTimestamp()`                                                                                                        |
-| `timeline.ts`       | The clock plus calibrated offsets: `songTime()`, `judgeSongTime()`, `startTimeFor()`                                                                                                                      |
+| `timeline.ts`       | The clock plus calibrated offsets: `songTime()`, `judgeSongTime()`, `shownSongTime()`, `startTimeFor()`                                                                                                   |
 | `sampler.ts`        | Piano voices: `noteOn` / `noteOff`, velocity curve, release envelope, 48-voice cap, and a playback rate that tunes the pianos to a recording                                                              |
 | `piano-samples.ts`  | Loads the 88 FluidR3 MP3s with `fetch` and `decodeAudioData`, six at a time                                                                                                                               |
 | `scheduler.ts`      | Look-ahead accompaniment (25 ms tick, 100 ms horizon) and the `AccompanimentNote` type charts use                                                                                                         |
@@ -121,7 +122,8 @@ A chart can name a recording, `audio: { src, offsetMs }` (see [Charts](#format-v
 - **Song time** is in ms of chart time (the chart at 1×). The clock maps context time (`ctx.currentTime`) to song time: at tempo `t` (0.75 to 1.5) song time advances `t` ms per real ms. Nothing is derived from frame counts.
 - Pausing stores the song position; resuming re-anchors it to the current context time. A recreated context starts again at `currentTime` 0, so no context-time anchor survives a pause. Changing the tempo re-anchors so the position does not jump.
 - `engine.timeline.songTime()` is for rendering: the song time the player hears now, through the output timestamp. It never goes backwards while the clock runs.
-- `engine.timeline.judgeSongTime(event.timeStamp)` is the song time at which a tap happened. Gameplay judges hits with it, and it is the only place the input offset is applied.
+- `engine.timeline.judgeSongTime(event.timeStamp)` is the song time at which a tap happened. Rhythm judges hits with it, and it is the only place the input offset is applied.
+- `engine.timeline.shownSongTime(event.timeStamp)` is the song time the stage was showing at an event, with no input offset. Tiles, which judges no timing, counts its inputs at it (see [Tiles](#tiles)).
 - Accompaniment, clicks and the recording start at `engine.timeline.startTimeFor(c)`: `clock.ctxTimeFor(c) − A / 1000`.
 
 ### Latency offsets
@@ -210,7 +212,7 @@ Everything under `web/src/game/`, drawn by `web/src/scene/game-stage.ts`.
 | Field              | Values                                                                                        |
 | ------------------ | --------------------------------------------------------------------------------------------- |
 | `chart`            | a `Chart`, or the promise of one while it downloads                                           |
-| `mode`             | `rhythm` or `tiles` (`GAME_MODES`); Tiles plays as Rhythm until it has rules (PLA-14)         |
+| `mode`             | `rhythm` or `tiles` (`GAME_MODES`): the game, which picks the rules (see [Tiles](#tiles))     |
 | `difficulty`       | `easy`, `normal`, `hard`                                                                      |
 | `tempo`            | `0.75`, `1`, `1.25`, `1.5`: playback speed; pitch follows only for songs with a recording     |
 | `failMode`         | `classic` (first Miss or empty press ends the run) or `relaxed` (misses only break the combo) |
@@ -218,7 +220,9 @@ Everything under `web/src/game/`, drawn by `web/src/scene/game-stage.ts`.
 
 **Commands:** `start()`, `pause(reason?)`, `resume()`, `restart()`, `quit()`. A command that does not apply in the current state is ignored. Call `start`, `resume` and `restart` synchronously from a user gesture: they may unlock, recover or recreate the audio context.
 
-**Outputs:** `state` with a `statechange` event, `stats()` (score, combo, max combo, counts, accuracy, progress, stars; cheap enough to read every frame), `loading` (chart, piano-sample and recording progress), `pauseInfo`, `countdown`, `results` and `error`, plus `judgment` events for feedback.
+**Outputs:** `state` with a `statechange` event, `stats()` (score, combo, max combo, counts, accuracy, progress, stars; cheap enough to read every frame), `loading` (chart, piano-sample and recording progress), `pauseInfo`, `countdown`, `results` and `error`, plus `judgment` events for feedback (and, in Tiles, `notyet` for a tile pressed before its turn).
+
+The gameplay session adds what the stage and input need: `input` (the lane input sink), `update()` and `view()` every frame, and `setExitAlong()`, which tells Tiles where the stage's layout loses a tile (call it on every resize: the layout decides it, and on the tabletop so does the screen's bottom edge).
 
 | State       | Meaning                                                                  |
 | ----------- | ------------------------------------------------------------------------ |
@@ -236,7 +240,7 @@ Everything under `web/src/game/`, drawn by `web/src/scene/game-stage.ts`.
 
 Start needs every pitch the run plays: the selected difficulty's tiles plus the common and that difficulty's accompaniment. If one of them failed to download, the session stops at `error` and the Play tile offers Reload (the piano samples only load at launch). Missing notes the song never plays only bring up a notice; the song stays playable. A recording that did not load never stops a song: `loading.backing` becomes `failed` and the song plays without it.
 
-**Results** (`FinalResults`): outcome (and, for a failure, whether a missed tile or an empty tap ended it), the game (`mode`), song id and title, difficulty, tempo, fail mode, score, accuracy, max combo, Perfect/Good/Miss counts, progress, stars and the Perfect badge.
+**Results** (`FinalResults`): outcome (and, for a failure, whether a missed tile or an empty tap ended it), the game (`mode`), song id and title, difficulty, tempo, fail mode, score, accuracy, max combo, the counts of the game's judgments (Rhythm: Perfect, Good, Miss; Tiles: `clear` and Miss), progress, stars and the Perfect badge.
 
 **Pause, audio recovery and the countdown.** Pausing (the HUD button, backgrounding, an audio interruption, a cancelled touch, the window losing focus) freezes the song clock and judgment, fades out all sound, keeps the progress of held tiles and forgets which finger or key held them; `pauseInfo.heldLanes` lists those lanes. The pause screen calls `resume()` from a tap:
 
@@ -248,7 +252,7 @@ The engine side of this: `engine.resumeFromGesture({ resumeClock: false })` reco
 
 ### Rules
 
-The rules live in `simulation.ts`, `judgment.ts` and `scoring.ts`: pure code with no clock, DOM or audio, and the tests that pin them. Every number below is a tunable constant there.
+These are Rhythm's; Tiles plays by [its own](#tiles). The rules live in `simulation.ts`, `judgment.ts` and `scoring.ts`: pure code with no clock, DOM or audio, and the tests that pin them. Every number below is a tunable constant there.
 
 - **Timing.** Chart times are ms at 1×; judgment windows are real ms, equally generous at every tempo. A press is judged at `timeline.judgeSongTime(event.timeStamp)` (calibration already applied). Perfect is within 50 ms, Good within 120 ms. An unhit tile becomes a Miss strictly after its +120 ms boundary.
 - **Which tile.** A press takes the earliest unresolved tile in its lane whose window contains it. A press with nothing to take is an empty tap: one Miss. During the lead-in (song time below 0) such a press is ignored instead, while a press inside the first tile's window still counts.
@@ -263,7 +267,7 @@ The rules live in `simulation.ts`, `judgment.ts` and `scoring.ts`: pure code wit
 
 `input.ts` turns Pointer Events on `#stage` and the D F J K keys into lane presses, each keyed by its pointer id or key code:
 
-- A press counts anywhere on a lane, found by casting the pointer onto the highway, and binds the input to that lane until it lifts: sliding never changes lane. Two fingers landing in one frame are two presses with their own timestamps.
+- A press counts anywhere on a lane, found by casting the pointer onto the highway, and binds the input to that lane until it lifts: sliding never changes lane. Two fingers landing in one frame are two presses with their own timestamps. In Tiles a finger's press also carries where along the lane it landed (see [Tiles](#tiles)).
 - Key auto-repeat, a second press from an input that is already down, other mouse buttons and modified keys are ignored. An `event.timeStamp` more than 250 ms old, or in the future, is replaced by `performance.now()` (WebKit bug 217099).
 - A cancelled touch (a system gesture, palm rejection, a rotation that drops the touch) pauses the run without penalty, as does the window losing focus. A rotation that keeps the touches keeps the run: held tiles stay bound by pointer id and the lanes refit.
 - Pausing forgets every held input, so a finger still on the glass does nothing until it lifts and presses again (during the countdown, to reclaim a hold).
@@ -283,17 +287,35 @@ Touch uses the layout's bounds: a touch is cast onto the table and divided over 
 
 **Sharpness.** The lane surface is a shader (`highway-material.ts`), not a texture: every divider and the highway's sides are antialiased from the screen-space derivative (`fwidth`), so they are one device pixel crisp at any size, tilt or pixel ratio, and the far end fades into the water with the scene fog. The canvas renders at CSS size × device pixel ratio (capped at 2, `app/viewport.ts`), and MSAA stays off at 2× density (`antialias: window.devicePixelRatio < 2`). Draw calls stay at eleven.
 
+### Tiles
+
+The second game, in the style of Magic Tiles 3, on the same songs, charts, difficulties, speeds and fail modes. Its rules are `tiles-simulation.ts`, a sibling of `simulation.ts` with the same interface, determinism and finalization (no clock, DOM or audio; one passage replayed at 30, 60 and 120 fps gives the same result). The session picks it from `mode`.
+
+**Rules.** Every number is a tunable constant; the two open choices are pinned in `TILES_RULES`.
+
+- **Claiming.** A tile can be claimed from the moment it appears at the top of the lane until its head has crossed the exit line, whatever the timing. Tiles go in order: only the earliest unclaimed tile can be claimed, or either tile of an unclaimed double. A press on a later tile while an earlier one waits is ignored with no penalty, and the tile shakes ("not yet", `laterTile: 'notYet'`; `'emptyTap'` would make it a Miss). A press on no tile at all, the water between tiles, is an empty tap: a Miss. During the lead-in an empty tap is ignored, and tiles already on screen can be claimed. Pressing a tile again while it is still on the stage does nothing: a long tile being held, a lost tile sliding off in red, or a cleared tile during its pop (`POP_MS`, 180 real ms, the stage's flash), which covers a double-tap or a bouncing finger. Once the pop is over the tile is gone, and a press where it was is an empty tap. The simulation and the stage time the pop alike, in song time from when the tile cleared (a tap at its claim, a long tile when it filled), so the tile can be pressed harmlessly exactly while its pop shows.
+- **Timing and calibration.** Tiles ignores the input calibration: with no timing to judge, a tile is claimable while it is shown. Every press and release counts at `shownSongTime(event.timeStamp)`, the song time the stage was showing when it happened, and frames finalize up to `shownSongTime(now) − 250 ms × tempo` (Rhythm's grace, on the same time base, so an input still on its way is judged before a loss it could prevent; the pause settles to `shownSongTimeNow()`). So a tile tapped before it visibly crosses the exit line is claimed and one tapped after it is lost, a long tile let go before it shows full is a tail Miss, at any calibration. The melody is unaffected: an early claim's note is scheduled at `t` with the audio offset, as all scheduled sound is, and a late one sounds at once.
+- **Exit line.** Where a tile is lost: the near end of the highway when handheld, the bottom of the screen inside the safe area on the tabletop (the lanes run off it). A head is lost once all of it has crossed the line, at `t + exitAlong × scrollDurationMs × tempo` (`exitTime`), with the same finalization grace as Rhythm. The exit time is a function of the scroll duration in force, so a speed that rises through a song only has to change what it is fed. The line moves with the layout: rotating from tabletop to handheld mid-song brings it nearer, and a tile already past the new line is lost at once (usually after the countdown, as the rotation cancels the touches).
+- **Melody.** The tile's note starts at `max(claim, t)` (`melody: 'onBeat'`): a tile claimed early has its note scheduled on the song clock, calibrated like the accompaniment, so the tune stays in time; a late claim sounds at once; a tile never claimed never sounds. Pause, quit, restart and a failure cancel waiting notes, and resuming schedules them again (a long tile's only if it is held again). `melody: 'atTap'` would play every note at the claim, as Rhythm does.
+- **Long tiles.** Pressed anywhere on them; the tile fills from its note's start over its `dur` and clears when full (or when its top leaves the screen first, `holdDoneTime`), releasing the note. Letting go before that is a tail Miss. The stage shows it clear and popping from that moment; its judgment (the HUD's Cleared, the note's release) arrives after the finalization grace, up to 250 ms later. Pause and countdown reclaim them as in Rhythm.
+- **Scoring.** No Perfect or Good: every cleared unit (tap, long-tile head, long-tile tail) is judged `clear` and scores 100 × the combo multiplier. Accuracy is cleared ÷ resolved units; stars and progress are Rhythm's; the Perfect badge needs a finished run with no Miss. The HUD and results say **Cleared** and **Missed** (`MODE_JUDGMENTS` in `scoring.ts`).
+- **Fail modes.** Classic ends the run at the first tile that falls off, early release or empty tap, with the red highlight and the visual rewind showing the tile that fell. Relaxed breaks the combo and plays on.
+
+**Input.** A finger's press is hit-tested against the tiles: `spotAtNdc` (`highway-layout.ts`) casts the pointer into the lanes' plane and returns the lane and the place along it in scroll windows, which the session turns into the chart ms of a tile drawn there (`songMs − along × scrollDurationMs × tempo`, at the song time the stage was showing when the finger landed: `shownSongTime`, with no input offset, so the calibration never moves the hit area); the simulation finds the tile from that time. The press counts at that same time, which places the note's start and orders it against tiles being lost. Across, the whole lane counts; along, the tile's head and body plus a slack per layout (`tileSlack`, larger handheld, where tiles far up the lane are only a few px tall). Tune it on the iPad. The touch area reaches past the far end by that slack, since tiles appear there; the HUD band takes no taps apart from the pause button. D F J K claim the next tile in their lane once it has appeared.
+
+**Stage.** Same layouts, camera and charts. Tiles are dark ink, shown from the top of the lane (no fog on them), with the next tile, or both of a double, tinted lily (the game's accent, `--game-tiles`). The hit line is gone: its mesh becomes a faint lily exit line, and its glow and the held-lane glows are hidden, since a line that lights up would say timing matters. A claimed tile pops where it is (a lily flash that rides down with the lanes, plus a ripple), a long tile is one tall tile whose lily fill rises as it is held and pops whole when full (drawn from `holdDoneTime`, not when its judgment arrives), and a tile that falls off gets Rhythm's red. Draw calls stay at eleven or fewer.
+
 ### The menus
 
 `src/menus/` holds the screens around the game. They drive the session only through `GameSession` and live in the HUD layer, an HTML overlay above the canvas. Every screen works in portrait and landscape, keeps its controls at least 44 px, and stays inside the safe areas.
 
-- **Home:** the title and a card per game, **Rhythm** and **Tiles**, side by side in landscape and stacked in portrait. Each card has the game's name, icon, accent colour, one line about it and a looping preview of it being played. A tap on a card picks that game and opens the songs; that first tap also unlocks the audio. Enter (or Space) opens the game picked last. Without `?debug` only the Rhythm card shows (`offeredGameModes()` in `flow.ts`, the one place PLA-14 removes), and a saved Tiles choice plays as Rhythm.
+- **Home:** the title and a card per game, **Rhythm** and **Tiles**, side by side in landscape and stacked in portrait. Each card has the game's name, icon, accent colour, one line about it and a looping preview of it being played. A tap on a card picks that game and opens the songs; that first tap also unlocks the audio. Enter (or Space) opens the game picked last.
 - **Songs:** the catalog, gentlest first, under a badge naming the game in its accent colour, with **Change game** (back to Home) and **How to play**. Easy / Normal / Hard tabs pick the difficulty, and each song shows its best stars and score in this game for that difficulty at the chosen speed. The panel has the speed (0.75× to 1.5×) and the **Play** tile. Every song is unlocked. Picking a song, difficulty or speed calls `load()` at once, so the chart and piano load while the player chooses; a chart already downloaded is reused. Play calls `start()` inside the tap, unless the sound is delayed (wireless headphones): then a dialog asks first (see [Delayed output](#delayed-output-wireless-headphones)). While the song loads it shows progress, and the next tap after that starts it. A chart that did not download offers **Try again** (offline, it says the song is not on the device yet), and the rest of the list still works. Missing piano notes offer **Reload**.
 - **How to play:** the game's preview and three steps, then **Got it**. It comes before the first Tiles run (Got it starts the song inside its tap, and is remembered in `seenIntro`; Escape closes it and starts nothing), and **How to play** on Songs opens it for either game. Focus returns to the button that opened it.
 - **Settings** (from Songs): the game (each option with its preview and line), then fail mode (Classic / Relaxed, with a hint per game) and tile speed, which apply from the next run; Volume and Accompaniment change the sound at once, and the audio output latency is shown under them, with **Warn me again** when "don't ask again" was chosen (see [Delayed output](#delayed-output-wireless-headphones)). **Calibrate timing** opens the latency calibration and returns to Settings.
 - **Credits** (from Songs): every entry of `src/credits/credits.json`, with its licence and source as links that open outside the game.
 - **Pause:** names the game under its title. Opens from the HUD button, or automatically on backgrounding, an audio interruption, a cancelled touch or lost focus. **Resume** brings the sound back if needed (it asks for one more tap when the first did not), then counts 3-2-1 over the lanes; the countdown lets touches through, so held lanes can be reclaimed. **Restart** and **Quit** (to the songs) are there too.
-- **Results:** the game, cleared or failed, score, stars, accuracy, max combo, Perfect / Good / Miss, and **New best!** when the run beat the saved best in that game for that song, difficulty and speed (a failed run counts). **Retry** or **Song list**.
+- **Results:** the game, cleared or failed, score, stars, accuracy, max combo, the game's counts (Perfect / Good / Miss, or Cleared / Missed), and **New best!** when the run beat the saved best in that game for that song, difficulty and speed (a failed run counts). **Retry** or **Song list**.
 
 Keys: Enter is the screen's main action (Home → the last game's songs, Play, Retry, Resume); Escape goes back (Settings and Credits → Songs → Home), closes How to play and the delayed-sound dialog, pauses and resumes during a run, and leaves the results for the songs. Lanes are D F J K, a mouse click, or touch. Overlays are plain elements: the stage underneath is `inert`, and focus moves to each screen's heading or main button. Escape is desktop-only; every screen also has an on-screen way back. `prefers-reduced-motion` turns off the entrance and celebration animations, and holds each game preview on one frame.
 
@@ -455,6 +477,15 @@ Open the Home Screen app with `?debug`, pick Piano Sonata No. 8 "Pathétique" on
 4. **Rotation.** Rotate mid-song: the layout changes and play goes on, or it pauses if iPadOS cancelled the touches.
 5. **Sharpness and the landscape layout.** Compare portrait and landscape at the iPad's native density: dividers, tile edges and the hit line should be crisp, and tile and ring corners should show no visible stair-stepping (if they do, MSAA at 2× is the one-line change in `createWebGLRenderer`, to be weighed against the frame rate). In landscape the four lanes should span the width, the pause button and score sit above them, and every lane should be playable with the fingers resting on the keys, including both outer lanes and the area below the line. Record the iPad model and the iPadOS and Safari versions, in Safari and in Home Screen mode, and the landscape safe-area insets.
 
+### Tiles on an iPad
+
+Play a Tiles song in portrait and in landscape, at Normal and at Rapid speed on Hard.
+
+1. **Hitting tiles.** Tap tiles near the top, in the middle and just before they fall off: each clears. Taps a little off a tile still count; taps on the water between tiles are Misses. If either feels wrong, adjust `tileSlack` per layout in `highway-layout.ts`.
+2. **Two fingers.** Doubles with two fingers landing together; a long tile held with one finger while the other taps the next tiles.
+3. **Order and timing.** Tap a tile behind the next one: it shakes and nothing is lost. Claim a tile early: its note still sounds on the beat. Let a tile fall off in Classic: the run ends showing it. With a saved calibration, a tile tapped just before it reaches the exit line still clears. Touch a long tile again as it pops full: nothing happens.
+4. **Pause.** Claim a tile early, pause before its beat and resume: the note sounds on the beat, not during the pause.
+
 ### Menus on an iPad
 
 Check each in portrait and landscape, and once in Split View.
@@ -465,7 +496,7 @@ Check each in portrait and landscape, and once in Split View.
 4. **Saved progress.** Finish a song, change the speed and a setting, force-quit and relaunch, in Airplane Mode: the best score, speed and setting are still there.
 5. **Background mid-song.** Switch apps during a song and come back: the pause screen shows; **Resume** counts 3-2-1.
 6. **Credits.** Tap a licence link: it opens outside the game, and PlatyJam is still where you left it.
-7. **The games** (with `?debug`). Home shows both cards with moving previews; tapping **Tiles** starts the sound and opens Songs with the Tiles badge. The first Play shows How to play; **Got it** starts the song. **Change game**, **How to play** and the Settings choice work, and the choice survives a relaunch. Without `?debug`, Home shows the Rhythm card alone. With Reduce Motion on, the previews stand still.
+7. **The games.** Home shows both cards with moving previews; tapping **Tiles** starts the sound and opens Songs with the Tiles badge. The first Play shows How to play; **Got it** starts the song. **Change game**, **How to play** and the Settings choice work, and the choice survives a relaunch. With Reduce Motion on, the previews stand still.
 
 ### Bluetooth headphones
 

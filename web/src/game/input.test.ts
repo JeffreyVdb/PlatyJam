@@ -160,3 +160,41 @@ describe('eventTime', () => {
     expect(eventTime(749, 1000)).toBe(1000);
   });
 });
+
+describe('lane input with the Tiles hit test', () => {
+  it('passes where a finger landed along the lane, and keys without one', () => {
+    const surface = document.createElement('main');
+    document.body.append(surface);
+    const calls: unknown[][] = [];
+    const input = installLaneInput({
+      surface,
+      win: window,
+      laneAt: () => undefined,
+      // Four 100 px lanes; `along` grows down the screen. Off the lanes above y = 0.
+      spotAt: (x, y) =>
+        y < 0 ? undefined : { lane: Math.floor(x / 100), along: (y - 300) / 400, reach: 0.05 },
+      accepting: () => true,
+      now: () => 1000,
+      sink: {
+        press: (id, lane, at, spot) => calls.push([id, lane, at, spot]),
+        release: () => undefined,
+        cancel: () => undefined,
+        blur: () => undefined,
+      },
+    });
+    const down = (pointerId: number, clientX: number, clientY: number) => {
+      surface.dispatchEvent(
+        new PointerEvent('pointerdown', { pointerId, pointerType: 'touch', clientX, clientY }),
+      );
+    };
+    down(1, 250, 100);
+    down(2, 50, -10);
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyK' }));
+    expect(calls).toEqual([
+      ['p1', 2, 1000, { lane: 2, along: -0.5, reach: 0.05 }],
+      ['kKeyK', 3, 1000, undefined],
+    ]);
+    input.dispose();
+    surface.remove();
+  });
+});
