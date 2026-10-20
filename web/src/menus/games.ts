@@ -5,7 +5,7 @@ import { el } from './controls';
 /**
  * What the menus say and show about each game: its name, icon, one line, the How to
  * play steps and the fail-mode hints, plus the badge and the looping preview. The
- * accent colours are tokens in style.css (`--rhythm`, `--tiles`).
+ * accent colours are tokens in style.css (`--game-rhythm`, `--game-tiles`).
  */
 export interface GameInfo {
   name: string;

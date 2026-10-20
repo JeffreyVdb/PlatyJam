@@ -8,7 +8,6 @@ import {
   formatTempo,
   isModal,
   nearestScrollSpeed,
-  offeredGameModes,
   playButtonFor,
   resolveGameMode,
   resolveSelection,
@@ -206,12 +205,7 @@ describe('setupKey', () => {
   });
 });
 
-describe('the Tiles gate', () => {
-  it('offers Tiles only with ?debug', () => {
-    expect(offeredGameModes(false)).toEqual(['rhythm']);
-    expect(offeredGameModes(true)).toEqual(['rhythm', 'tiles']);
-  });
-
+describe('the games offered', () => {
   it('plays a saved Tiles choice as Rhythm while Tiles is not offered', () => {
     expect(resolveGameMode('tiles', ['rhythm'])).toBe('rhythm');
     expect(resolveGameMode('tiles', ['rhythm', 'tiles'])).toBe('tiles');

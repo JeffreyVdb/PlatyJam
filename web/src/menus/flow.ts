@@ -1,12 +1,6 @@
 import type { CatalogSong } from '../catalog/schema';
 import type { DifficultyName } from '../chart/schema';
-import {
-  GAME_MODES,
-  type GameMode,
-  type LoadingInfo,
-  type SessionState,
-  type Tempo,
-} from '../game/session-contract';
+import type { GameMode, LoadingInfo, SessionState, Tempo } from '../game/session-contract';
 import type { Settings } from '../save/save-data';
 
 /**
@@ -147,14 +141,6 @@ export function resolveSelection(
     difficulty: settings.difficulty,
     tempo: settings.tempo,
   };
-}
-
-/**
- * The Tiles gate: Tiles has no gameplay yet (PLA-14), so the menus offer it only with
- * `?debug`. PLA-14 deletes this and offers `GAME_MODES`.
- */
-export function offeredGameModes(debug: boolean): readonly GameMode[] {
-  return debug ? GAME_MODES : ['rhythm'];
 }
 
 /** The saved game, or Rhythm when the saved one is not offered. */

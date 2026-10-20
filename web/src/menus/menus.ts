@@ -54,7 +54,7 @@ export interface MenusOptions {
   store: SaveStore;
   /** From the catalog, gentlest first. */
   songs: readonly CatalogSong[];
-  /** The games Home and Settings offer (`offeredGameModes`). Rhythm only by default. */
+  /** The games Home and Settings offer (the app offers `GAME_MODES`). Rhythm only by default. */
   modes?: readonly GameMode[];
   credits: Credits;
   charts: ChartCache;
