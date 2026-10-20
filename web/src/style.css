@@ -1432,6 +1432,15 @@ body {
   outline-offset: 4px;
 }
 
+/*
+ * The preview fills its column and stretches to the card's height. Without a width,
+ * the stretched height sets it through the 3:4 ratio, and a tall card pushes the
+ * preview under the words.
+ */
+.mode-card .preview {
+  width: 100%;
+}
+
 .mode-card-text {
   display: flex;
   flex-direction: column;
