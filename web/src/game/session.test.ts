@@ -15,9 +15,11 @@ import {
   REWIND_DURATION_MS,
   REWIND_SONG_MS,
   type SessionAudio,
+  TAP_NOTE_S,
 } from './session';
 import type { SessionSetup, SessionState } from './session-contract';
 import { FINALIZE_GRACE_MS } from './simulation';
+import type { LaneSpot } from './input';
 
 const tap = (t: number, lane: number, pitches = [60]): Tile => ({ t, lane, pitches, vel: 100 });
 const hold = (t: number, lane: number, dur: number): Tile => ({
@@ -1057,6 +1059,154 @@ describe('game session', () => {
       session.start();
       fake.engine.events.emit('silenced', { fadeMs: 50 });
       expect(session.state).toBe('quit');
+    });
+  });
+
+  describe('Tiles', () => {
+    const SCROLL_MS = 1600;
+    const loadTiles = (tiles: Tile[], overrides: Partial<SessionSetup> = {}) =>
+      loaded(tiles, { mode: 'tiles', scrollDurationMs: SCROLL_MS, ...overrides });
+    /** A finger on the tile at chart ms `t`, at the current song time (1×). */
+    const on = (t: number): LaneSpot => ({
+      lane: 0,
+      along: (songMs() - t) / SCROLL_MS,
+      reach: 0.02,
+    });
+    const touch = (input: string, lane: number, spot: LaneSpot) => {
+      session.input.press(input, lane, fake.perf, { ...spot, lane });
+    };
+    const noteOns = () => fake.piano.noteOn.mock.calls as unknown[][];
+
+    it('plays a tile claimed early on its beat, on the song clock', async () => {
+      await loadTiles([tap(500, 0), tap(900, 1)]);
+      session.start();
+      frames(800); // song -200
+      touch('a', 0, on(500));
+      expect(session.stats()).toMatchObject({ clear: 1, perfect: 0, combo: 1, score: 100 });
+      const beat = fake.engine.timeline.startTimeFor(500);
+      expect(beat).toBeGreaterThan(fake.engine.context.currentTime + 0.6);
+      expect(noteOns()).toEqual([[60, 100, beat]]);
+      expect(fake.piano.noteOff).toHaveBeenCalledWith(expect.anything(), beat + TAP_NOTE_S);
+    });
+
+    it('plays a tile claimed late at once', async () => {
+      await loadTiles([tap(500, 0)]);
+      session.start();
+      frames(1600); // song 600: past its beat, still on screen
+      touch('a', 0, on(500));
+      expect(noteOns()).toEqual([[60, 100]]);
+    });
+
+    it('never plays a tile nobody claimed, and fails Classic at the exit line', async () => {
+      await loadTiles([tap(500, 0), tap(2500, 1)]);
+      session.setExitAlong(0.25); // lost 400 ms past the line
+      session.start();
+      frames(1880); // song 880
+      expect(session.state).toBe('playing');
+      frames(400 + FINALIZE_GRACE_MS + 32);
+      expect(session.state).toBe('failing');
+      expect(fake.piano.noteOn).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(session.results).toMatchObject({
+        mode: 'tiles',
+        outcome: 'failed',
+        failure: { kind: 'missedTile', lane: 0, tileIndex: 0 },
+        clear: 0,
+        miss: 1,
+      });
+    });
+
+    it('cancels waiting notes on pause and schedules them again on resume', async () => {
+      await loadTiles([tap(500, 0), tap(900, 1)]);
+      session.start();
+      frames(800);
+      touch('a', 0, on(500));
+      expect(noteOns()).toHaveLength(1);
+      session.pause();
+      expect(fake.piano.stopAll).toHaveBeenLastCalledWith(PAUSE_FADE_MS);
+      frames(2000);
+      session.resume();
+      await vi.advanceTimersByTimeAsync(COUNTDOWN_BEAT_MS * 3);
+      expect(session.state).toBe('leadIn');
+      // The clock moved on in context time: the beat is due later than first planned.
+      expect(noteOns()).toEqual([
+        [60, 100, expect.any(Number)],
+        [60, 100, fake.engine.timeline.startTimeFor(500)],
+      ]);
+      // Once it has sounded, a pause has nothing left to bring back.
+      frames(800);
+      session.pause();
+      session.resume();
+      await vi.advanceTimersByTimeAsync(COUNTDOWN_BEAT_MS * 3);
+      expect(noteOns()).toHaveLength(2);
+    });
+
+    it('brings back a long tile’s waiting note only if it is held again', async () => {
+      for (const reclaim of [true, false]) {
+        fake.piano.noteOn.mockClear();
+        await loadTiles([hold(500, 2, 400)], { failMode: 'relaxed' });
+        session.start();
+        frames(800);
+        touch('a', 2, on(500));
+        session.pause();
+        session.resume();
+        if (reclaim) press('b', 2);
+        await vi.advanceTimersByTimeAsync(COUNTDOWN_BEAT_MS * 3);
+        expect(noteOns().map((call) => call.length)).toEqual(reclaim ? [3, 3, 3, 3] : [3, 3]);
+        session.quit();
+      }
+    });
+
+    it('quit and restart cancel waiting notes for good', async () => {
+      await loadTiles([tap(500, 0), tap(900, 1)]);
+      session.start();
+      frames(800);
+      touch('a', 0, on(500));
+      session.restart();
+      expect(fake.piano.stopAll).toHaveBeenCalledWith(QUIT_FADE_MS);
+      frames(800);
+      session.pause();
+      session.resume();
+      await vi.advanceTimersByTimeAsync(COUNTDOWN_BEAT_MS * 3);
+      expect(noteOns()).toHaveLength(1);
+      session.quit();
+      expect(fake.piano.stopAll).toHaveBeenLastCalledWith(QUIT_FADE_MS);
+    });
+
+    it('shakes a later tile instead of claiming it, and fails Classic on the water', async () => {
+      await loadTiles([tap(500, 0), tap(900, 1)]);
+      const notYet: unknown[] = [];
+      session.events.on('notyet', (event) => notYet.push(event));
+      session.start();
+      frames(800);
+      touch('a', 1, on(900));
+      expect(notYet).toEqual([{ lane: 1, tileIndex: 1 }]);
+      expect(session.stats()).toMatchObject({ clear: 0, miss: 0 });
+      frames(400); // song 200
+      touch('b', 3, on(700));
+      expect(session.state).toBe('failing');
+      expect(session.stats()).toMatchObject({ miss: 1 });
+    });
+
+    it('claims with keys, and reports Tiles results: cleared ÷ resolved, badge for no Miss', async () => {
+      await loadTiles([tap(500, 0), hold(1500, 1, 500)]);
+      session.start();
+      frames(1200); // song 200
+      press('kD', 0);
+      press('kF', 1);
+      frames(4200);
+      expect(session.state).toBe('finished');
+      expect(session.results).toMatchObject({
+        mode: 'tiles',
+        outcome: 'cleared',
+        clear: 3,
+        perfect: 0,
+        good: 0,
+        miss: 0,
+        accuracy: 100,
+        perfectBadge: true,
+        score: 300,
+      });
     });
   });
 });

@@ -45,6 +45,12 @@ export interface TilesRules {
 
 export const TILES_RULES: Readonly<TilesRules> = { laterTile: 'notYet', melody: 'onBeat' };
 
+/**
+ * Where a tile is lost until the stage says (`setExitAlong`), in scroll windows past
+ * the hit line: about the handheld layout's.
+ */
+export const DEFAULT_EXIT_ALONG = 0.13;
+
 /** Chart ms at which a tile at `t` appears at the top of the lane. */
 export function appearTime(t: number, scrollDurationMs: number, tempo: number): number {
   return t - scrollDurationMs * tempo;
