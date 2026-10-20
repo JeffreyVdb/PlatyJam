@@ -197,6 +197,7 @@ describe('game session', () => {
 
   const setup = (tiles: Tile[], overrides: Partial<SessionSetup> = {}): SessionSetup => ({
     chart: chartWith(tiles),
+    mode: 'rhythm',
     difficulty: 'normal',
     tempo: 1,
     failMode: 'classic',
@@ -468,6 +469,7 @@ describe('game session', () => {
       expect(session.state).toBe('finished');
       expect(session.results).toMatchObject({
         outcome: 'cleared',
+        mode: 'rhythm',
         songId: 'test-song',
         songTitle: 'Test Song',
         difficulty: 'normal',

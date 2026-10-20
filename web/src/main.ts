@@ -27,6 +27,7 @@ import { createHud, type Hud } from './hud/hud';
 import { createPlayHud } from './hud/play-hud';
 import { createResumeOverlay } from './hud/resume-overlay';
 import { createChartCache } from './menus/chart-cache';
+import { offeredGameModes } from './menus/flow';
 import { createMenus } from './menus/menus';
 import { createRendererHost, type RendererHost } from './render/renderer-host';
 import { createSaveStore, type SaveStore } from './save/save-store';
@@ -159,6 +160,7 @@ function startGame(
       ...parseCatalog(catalogJson).songs,
       ...(debug ? parseCatalog(debugCatalogJson).songs : []),
     ],
+    modes: offeredGameModes(debug),
     credits: parseCredits(creditsJson),
     charts,
     setVolume: (kind, volume) => {

@@ -1,6 +1,12 @@
 import type { CatalogSong } from '../catalog/schema';
 import type { DifficultyName } from '../chart/schema';
-import type { LoadingInfo, SessionState, Tempo } from '../game/session-contract';
+import {
+  GAME_MODES,
+  type GameMode,
+  type LoadingInfo,
+  type SessionState,
+  type Tempo,
+} from '../game/session-contract';
 import type { Settings } from '../save/save-data';
 
 /**
@@ -143,10 +149,30 @@ export function resolveSelection(
   };
 }
 
-/** Identifies a session setup: a different key needs a new `load()`. */
-export function setupKey(selection: Selection, settings: Readonly<Settings>): string {
+/**
+ * The Tiles gate: Tiles has no gameplay yet (PLA-14), so the menus offer it only with
+ * `?debug`. PLA-14 deletes this and offers `GAME_MODES`.
+ */
+export function offeredGameModes(debug: boolean): readonly GameMode[] {
+  return debug ? GAME_MODES : ['rhythm'];
+}
+
+/** The saved game, or Rhythm when the saved one is not offered. */
+export function resolveGameMode(saved: GameMode, offered: readonly GameMode[]): GameMode {
+  return offered.includes(saved) ? saved : 'rhythm';
+}
+
+/**
+ * Identifies a session setup: a different key needs a new `load()`. `mode` is the game
+ * the session plays (`resolveGameMode`), not necessarily the saved one.
+ */
+export function setupKey(
+  selection: Selection,
+  settings: Readonly<Settings>,
+  mode: GameMode,
+): string {
   const { songId, difficulty, tempo } = selection;
-  return [songId, difficulty, tempo, settings.failMode, settings.scrollDurationMs].join('/');
+  return [mode, songId, difficulty, tempo, settings.failMode, settings.scrollDurationMs].join('/');
 }
 
 /** The scroll speeds Settings offers, slowest first: real ms a tile is visible. */

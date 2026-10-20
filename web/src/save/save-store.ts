@@ -1,5 +1,5 @@
 import type { DifficultyName } from '../chart/schema';
-import type { FinalResults, Tempo } from '../game/session-contract';
+import type { FinalResults, GameMode, Tempo } from '../game/session-contract';
 import {
   bestKey,
   type BestScore,
@@ -18,11 +18,17 @@ import {
  *   (`{ version: 1, audioOffsetMs, inputOffsetMs, calibratedAt }`).
  */
 export const STORAGE_KEYS = {
-  save: 'platyjam.save.v1',
+  save: 'platyjam.save.v2',
   calibration: 'platyjam.calibration.v1',
 } as const;
 
 export const SAVE_KEY = STORAGE_KEYS.save;
+
+/**
+ * The version 1 save, from before there were two games. Read once when there is no
+ * version 2 save yet, and never written or removed, so an older build still finds it.
+ */
+export const SAVE_V1_KEY = 'platyjam.save.v1';
 
 type KeyValueStorage = Pick<Storage, 'getItem' | 'setItem'>;
 
@@ -41,14 +47,20 @@ export interface RecordedResults {
 }
 
 /**
- * The player's settings and best scores, kept in `localStorage` under `SAVE_KEY`.
+ * The player's settings and best scores, kept in `localStorage` under `SAVE_KEY`
+ * (read from `SAVE_V1_KEY` until the first write).
  * Every change is written at once. Reads and writes never throw: when storage is
  * blocked, full or missing, the save lives in memory for the session.
  */
 export interface SaveStore {
   readonly settings: Readonly<Settings>;
   updateSettings(patch: Partial<Settings>): void;
-  best(songId: string, difficulty: DifficultyName, tempo: Tempo): BestScore | undefined;
+  best(
+    mode: GameMode,
+    songId: string,
+    difficulty: DifficultyName,
+    tempo: Tempo,
+  ): BestScore | undefined;
   /** Folds a finished run into its best, deciding `newBest` first, and saves. */
   recordResults(results: FinalResults): RecordedResults;
   /** Writes the save again (on the lifecycle `pause`, or to retry a refused write). */
@@ -88,7 +100,7 @@ export function createSaveStore({
         refused('read');
         return parseSave(undefined);
       }
-      raw = target.getItem(SAVE_KEY);
+      raw = target.getItem(SAVE_KEY) ?? target.getItem(SAVE_V1_KEY);
     } catch (error) {
       refused('read', error);
       return parseSave(undefined);
@@ -126,12 +138,12 @@ export function createSaveStore({
       Object.assign(data.settings, patch);
       write();
     },
-    best(songId, difficulty, tempo) {
-      const best = data.bests[bestKey(songId, difficulty, tempo)];
+    best(mode, songId, difficulty, tempo) {
+      const best = data.bests[bestKey(mode, songId, difficulty, tempo)];
       return best ? { ...best } : undefined;
     },
     recordResults(results) {
-      const key = bestKey(results.songId, results.difficulty, results.tempo);
+      const key = bestKey(results.mode, results.songId, results.difficulty, results.tempo);
       const previous = data.bests[key];
       const { best, newBest } = mergeBest(previous, results, now().toISOString());
       data.bests[key] = best;

@@ -113,6 +113,7 @@ class FakeSession implements GameSession {
 
 const RESULTS: FinalResults = {
   outcome: 'cleared',
+  mode: 'rhythm',
   songId: 'gentle',
   songTitle: 'Gentle Song',
   difficulty: 'normal',
@@ -530,7 +531,7 @@ describe('menus', () => {
     expect(q('.result-score').textContent).toBe('4,200');
     expect(q('.result-badge').textContent).toBe('New best!');
     expect(document.activeElement?.textContent).toBe('Retry');
-    expect(store.best('gentle', 'normal', 1)?.score).toBe(4200);
+    expect(store.best('rhythm', 'gentle', 'normal', 1)?.score).toBe(4200);
 
     tap(buttonNamed('Retry'));
     expect(session.calls.at(-1)).toBe('restart');

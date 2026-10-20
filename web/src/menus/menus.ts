@@ -2,7 +2,12 @@ import { shouldWarn } from '../audio/latency-warning';
 import type { LatencyOffsets } from '../audio/timeline';
 import type { CatalogSong } from '../catalog/schema';
 import type { Credits } from '../credits/schema';
-import { type GameSession, isRunActive, type SessionState } from '../game/session-contract';
+import {
+  type GameMode,
+  type GameSession,
+  isRunActive,
+  type SessionState,
+} from '../game/session-contract';
 import type { RecordedResults, SaveStore } from '../save/save-store';
 import type { ChartCache } from './chart-cache';
 import {
@@ -10,6 +15,7 @@ import {
   isModal,
   type MenuScreen,
   playButtonFor,
+  resolveGameMode,
   resolveSelection,
   type Selection,
   setupKey,
@@ -47,6 +53,8 @@ export interface MenusOptions {
   store: SaveStore;
   /** From the catalog, gentlest first. */
   songs: readonly CatalogSong[];
+  /** The games Home and Settings offer (`offeredGameModes`). Rhythm only by default. */
+  modes?: readonly GameMode[];
   credits: Credits;
   charts: ChartCache;
   /** Applies a volume to the sound at once (the store keeps it separately). */
@@ -87,6 +95,7 @@ export function createMenus({
   session,
   store,
   songs,
+  modes = ['rhythm'],
   credits,
   charts,
   setVolume,
@@ -108,16 +117,21 @@ export function createMenus({
   /** Where focus returns when a screen opened from a button closes. */
   let opener: HTMLElement | undefined;
 
+  /** The game being played: the saved one, if it is offered. */
+  const currentMode = () => resolveGameMode(store.settings.gameMode, modes);
+
   /** Loads the session for the current choice, unless it already has it (or `force`). */
   const ensureLoaded = (force = false) => {
     if (isRunActive(session.state) || !selection.songId) return;
-    const key = setupKey(selection, store.settings);
+    const mode = currentMode();
+    const key = setupKey(selection, store.settings, mode);
     if (!force && key === loadedKey) return;
     loadedKey = key;
     startFailed = false;
     const { failMode, scrollDurationMs } = store.settings;
     session.load({
       chart: charts.get(selection.songId),
+      mode,
       difficulty: selection.difficulty,
       tempo: selection.tempo,
       failMode,
@@ -224,7 +238,7 @@ export function createMenus({
   const songSelect = createSongSelect({
     songs,
     selection: () => selection,
-    best: (songId, difficulty, tempo) => store.best(songId, difficulty, tempo),
+    best: (songId, difficulty, tempo) => store.best(currentMode(), songId, difficulty, tempo),
     onSelect: select,
     onPlay: play,
     onBack: back,

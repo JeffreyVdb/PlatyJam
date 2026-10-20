@@ -12,6 +12,7 @@ import {
 function results(overrides: Partial<FinalResults> = {}): FinalResults {
   return {
     outcome: 'cleared',
+    mode: 'rhythm',
     songId: 'fur-elise',
     songTitle: 'Für Elise',
     difficulty: 'normal',
@@ -47,9 +48,11 @@ const best = (overrides: Partial<BestScore> = {}): BestScore => ({
 describe('parseSave', () => {
   it('round-trips a valid save', () => {
     const save = {
-      version: 1 as const,
+      version: 2 as const,
       settings: {
         ...DEFAULT_SETTINGS,
+        gameMode: 'tiles' as const,
+        seenIntro: { rhythm: false, tiles: true },
         failMode: 'relaxed' as const,
         tempo: 1.25 as const,
         masterVolume: 0.4,
@@ -57,7 +60,7 @@ describe('parseSave', () => {
         difficulty: 'hard' as const,
         latencyWarningMutedAtMs: 187,
       },
-      bests: { 'fur-elise/hard/1.25': best() },
+      bests: { 'rhythm/fur-elise/hard/1.25': best(), 'tiles/fur-elise/hard/1.25': best() },
     };
     expect(parseSave(JSON.parse(JSON.stringify(save)))).toEqual(save);
   });
@@ -68,15 +71,17 @@ describe('parseSave', () => {
     ['an array', []],
     ['a string', 'save'],
     ['no version', { settings: { tempo: 1.5 } }],
-    ['a newer version', { version: 2, settings: { tempo: 1.5 } }],
+    ['a newer version', { version: 3, settings: { tempo: 1.5 } }],
   ])('reads %s as the defaults', (_, json) => {
     expect(parseSave(json)).toEqual(defaultSave());
   });
 
   it('keeps every valid setting and resets only the broken ones', () => {
     const { settings } = parseSave({
-      version: 1,
+      version: 2,
       settings: {
+        gameMode: 'piano',
+        seenIntro: { rhythm: 'yes', tiles: true },
         failMode: 'relaxed',
         scrollDurationMs: 99999,
         tempo: 1.1,
@@ -88,6 +93,7 @@ describe('parseSave', () => {
     });
     expect(settings).toEqual({
       ...DEFAULT_SETTINGS,
+      seenIntro: { rhythm: false, tiles: true },
       failMode: 'relaxed',
       masterVolume: 0.5,
       difficulty: 'easy',
@@ -96,7 +102,7 @@ describe('parseSave', () => {
 
   it('keeps a saved "don\'t ask again" latency, and reads anything else as asking', () => {
     const read = (value: unknown) =>
-      parseSave({ version: 1, settings: { latencyWarningMutedAtMs: value } }).settings
+      parseSave({ version: 2, settings: { latencyWarningMutedAtMs: value } }).settings
         .latencyWarningMutedAtMs;
     expect(read(187)).toBe(187);
     expect(read(0)).toBe(0);
@@ -107,7 +113,7 @@ describe('parseSave', () => {
 
   it('loads a save written before the latency warning, asking by default', () => {
     const { settings } = parseSave({
-      version: 1,
+      version: 2,
       settings: { failMode: 'relaxed', masterVolume: 0.5 },
     });
     expect(settings).toEqual({ ...DEFAULT_SETTINGS, failMode: 'relaxed', masterVolume: 0.5 });
@@ -116,32 +122,97 @@ describe('parseSave', () => {
 
   it('drops best scores with a bad key or bad values, and keeps the rest', () => {
     const { bests } = parseSave({
-      version: 1,
+      version: 2,
       bests: {
+        'rhythm/fur-elise/normal/1': best(),
+        'tiles/fur-elise/normal/1': best(),
         'fur-elise/normal/1': best(),
-        'fur-elise/normal/2': best(),
-        'fur-elise/extreme/1': best(),
-        'satie/easy/0.75': { ...best(), stars: 4 },
-        'satie/easy/1': { ...best(), score: -5 },
-        'satie/hard/1.5': 'great',
+        'piano/fur-elise/normal/1': best(),
+        'rhythm/fur-elise/normal/2': best(),
+        'rhythm/fur-elise/extreme/1': best(),
+        'rhythm/satie/easy/0.75': { ...best(), stars: 4 },
+        'rhythm/satie/easy/1': { ...best(), score: -5 },
+        'rhythm/satie/hard/1.5': 'great',
       },
     });
-    expect(bests).toEqual({ 'fur-elise/normal/1': best() });
+    expect(bests).toEqual({
+      'rhythm/fur-elise/normal/1': best(),
+      'tiles/fur-elise/normal/1': best(),
+    });
+  });
+
+  describe('a version 1 save', () => {
+    const v1 = {
+      version: 1,
+      settings: {
+        failMode: 'relaxed',
+        scrollDurationMs: 2000,
+        tempo: 1.25,
+        masterVolume: 0.4,
+        accompanimentVolume: 0.7,
+        songId: 'satie',
+        difficulty: 'hard',
+        latencyWarningMutedAtMs: 187,
+      },
+      bests: {
+        'fur-elise/normal/1': best(),
+        'satie/hard/1.25': best({ score: 2400, stars: 2 }),
+        'satie/extreme/1': best(),
+      },
+    };
+
+    it('becomes a version 2 save with its settings, playing Rhythm', () => {
+      expect(parseSave(v1)).toEqual({
+        version: 2,
+        settings: {
+          ...v1.settings,
+          gameMode: 'rhythm',
+          seenIntro: { rhythm: false, tiles: false },
+        },
+        bests: {
+          'rhythm/fur-elise/normal/1': best(),
+          'rhythm/satie/hard/1.25': best({ score: 2400, stars: 2 }),
+        },
+      });
+    });
+
+    it('never takes a game choice or a game-keyed best from it', () => {
+      const { settings, bests } = parseSave({
+        version: 1,
+        settings: { gameMode: 'tiles', seenIntro: { tiles: true } },
+        bests: { 'tiles/fur-elise/normal/1': best() },
+      });
+      expect(settings.gameMode).toBe('rhythm');
+      expect(settings.seenIntro).toEqual({ rhythm: false, tiles: false });
+      expect(bests).toEqual({});
+    });
+
+    it('reads anything broken in it as the defaults, without throwing', () => {
+      expect(parseSave({ version: 1, settings: 'x', bests: [] })).toEqual(defaultSave());
+    });
   });
 
   it('does not share the default objects between saves', () => {
     const a = defaultSave();
     a.settings.tempo = 1.5;
+    a.settings.seenIntro.tiles = true;
     a.bests.x = best();
     expect(defaultSave().settings.tempo).toBe(1);
+    expect(defaultSave().settings.seenIntro.tiles).toBe(false);
     expect(defaultSave().bests).toEqual({});
   });
 });
 
 describe('bestKey', () => {
-  it('is song, difficulty and tempo', () => {
-    expect(bestKey('fur-elise', 'hard', 0.75)).toBe('fur-elise/hard/0.75');
-    expect(bestKey('fur-elise', 'normal', 1)).toBe('fur-elise/normal/1');
+  it('is game, song, difficulty and tempo', () => {
+    expect(bestKey('rhythm', 'fur-elise', 'hard', 0.75)).toBe('rhythm/fur-elise/hard/0.75');
+    expect(bestKey('tiles', 'fur-elise', 'normal', 1)).toBe('tiles/fur-elise/normal/1');
+  });
+
+  it('keeps each game apart', () => {
+    expect(bestKey('rhythm', 'fur-elise', 'normal', 1)).not.toBe(
+      bestKey('tiles', 'fur-elise', 'normal', 1),
+    );
   });
 });
 

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { FinalResults } from '../game/session-contract';
 import { DEFAULT_SETTINGS, defaultSave } from './save-data';
-import { createSaveStore, SAVE_KEY, STORAGE_KEYS } from './save-store';
+import { createSaveStore, SAVE_KEY, SAVE_V1_KEY, STORAGE_KEYS } from './save-store';
 
 function memoryStorage(initial: Record<string, string> = {}) {
   const data = new Map(Object.entries(initial));
@@ -16,6 +16,7 @@ function memoryStorage(initial: Record<string, string> = {}) {
 
 const run: FinalResults = {
   outcome: 'cleared',
+  mode: 'rhythm',
   songId: 'fur-elise',
   songTitle: 'Für Elise',
   difficulty: 'hard',
@@ -34,16 +35,25 @@ const run: FinalResults = {
 };
 
 const now = () => new Date('2026-10-19T10:00:00Z');
+const defaultBest = {
+  score: 3000,
+  stars: 2,
+  accuracy: 80,
+  maxCombo: 25,
+  perfectBadge: false,
+  achievedAt: '2026-10-01T10:00:00.000Z',
+};
 const saved = (storage: ReturnType<typeof memoryStorage>): unknown =>
   JSON.parse(storage.data.get(SAVE_KEY) ?? 'null');
 
 describe('save store', () => {
   it('documents every key it and the calibration use', () => {
     expect(STORAGE_KEYS).toEqual({
-      save: 'platyjam.save.v1',
+      save: 'platyjam.save.v2',
       calibration: 'platyjam.calibration.v1',
     });
     expect(SAVE_KEY).toBe(STORAGE_KEYS.save);
+    expect(SAVE_V1_KEY).toBe('platyjam.save.v1');
   });
 
   it('starts from the defaults and writes each settings change at once', () => {
@@ -52,7 +62,7 @@ describe('save store', () => {
     expect(store.settings).toEqual(DEFAULT_SETTINGS);
     store.updateSettings({ tempo: 1.5, failMode: 'relaxed' });
     expect(store.settings).toMatchObject({ tempo: 1.5, failMode: 'relaxed' });
-    expect(saved(storage)).toMatchObject({ version: 1, settings: { tempo: 1.5 } });
+    expect(saved(storage)).toMatchObject({ version: 2, settings: { tempo: 1.5 } });
     expect(store.persistent).toBe(true);
   });
 
@@ -63,8 +73,62 @@ describe('save store', () => {
     first.recordResults(run);
     const second = createSaveStore({ storage: () => storage, now });
     expect(second.settings.masterVolume).toBe(0.25);
-    expect(second.best('fur-elise', 'hard', 1.25)).toMatchObject({ score: 4200, stars: 3 });
-    expect(second.best('fur-elise', 'hard', 1)).toBeUndefined();
+    expect(second.best('rhythm', 'fur-elise', 'hard', 1.25)).toMatchObject({
+      score: 4200,
+      stars: 3,
+    });
+    expect(second.best('rhythm', 'fur-elise', 'hard', 1)).toBeUndefined();
+  });
+
+  it('keeps the best scores of each game apart', () => {
+    const store = createSaveStore({ storage: () => memoryStorage(), now });
+    store.recordResults(run);
+    expect(store.best('tiles', 'fur-elise', 'hard', 1.25)).toBeUndefined();
+    // A first Tiles run is a new best, even below Rhythm's score.
+    expect(store.recordResults({ ...run, mode: 'tiles', score: 100 })).toMatchObject({
+      newBest: true,
+      previous: undefined,
+    });
+    expect(store.best('rhythm', 'fur-elise', 'hard', 1.25)?.score).toBe(4200);
+    expect(store.best('tiles', 'fur-elise', 'hard', 1.25)?.score).toBe(100);
+  });
+
+  describe('a version 1 save', () => {
+    const v1 = JSON.stringify({
+      version: 1,
+      settings: { ...DEFAULT_SETTINGS, gameMode: undefined, seenIntro: undefined, tempo: 1.5 },
+      bests: { 'fur-elise/hard/1.25': { ...defaultBest } },
+    });
+
+    it('is read when there is no version 2 save yet, with every best under Rhythm', () => {
+      const storage = memoryStorage({ [SAVE_V1_KEY]: v1 });
+      const store = createSaveStore({ storage: () => storage, now });
+      expect(store.settings).toEqual({ ...DEFAULT_SETTINGS, tempo: 1.5 });
+      expect(store.best('rhythm', 'fur-elise', 'hard', 1.25)).toEqual(defaultBest);
+      expect(store.best('tiles', 'fur-elise', 'hard', 1.25)).toBeUndefined();
+    });
+
+    it('is left untouched: every write goes to the version 2 key', () => {
+      const storage = memoryStorage({ [SAVE_V1_KEY]: v1 });
+      const store = createSaveStore({ storage: () => storage, now });
+      store.updateSettings({ gameMode: 'tiles' });
+      store.recordResults(run);
+      store.flush();
+      expect(storage.data.get(SAVE_V1_KEY)).toBe(v1);
+      expect(storage.setItem.mock.calls.every(([key]) => key === SAVE_KEY)).toBe(true);
+      expect(saved(storage)).toMatchObject({
+        version: 2,
+        settings: { gameMode: 'tiles', tempo: 1.5 },
+        bests: { 'rhythm/fur-elise/hard/1.25': { score: 4200 } },
+      });
+    });
+
+    it('is ignored once a version 2 save exists', () => {
+      const storage = memoryStorage({ [SAVE_V1_KEY]: v1 });
+      createSaveStore({ storage: () => storage, now }).updateSettings({ tempo: 0.75 });
+      const store = createSaveStore({ storage: () => storage, now });
+      expect(store.settings.tempo).toBe(0.75);
+    });
   });
 
   it('decides a new best against the stored best before saving it', () => {
@@ -78,7 +142,9 @@ describe('save store', () => {
       previous: { score: 4200 },
       best: { score: 5000, achievedAt: '2026-10-19T10:00:00.000Z' },
     });
-    expect(saved(storage)).toMatchObject({ bests: { 'fur-elise/hard/1.25': { score: 5000 } } });
+    expect(saved(storage)).toMatchObject({
+      bests: { 'rhythm/fur-elise/hard/1.25': { score: 5000 } },
+    });
   });
 
   it('reads corrupt data as the defaults without throwing, and overwrites it on change', () => {
@@ -106,7 +172,7 @@ describe('save store', () => {
     store.updateSettings({ tempo: 1.25 });
     store.recordResults(run);
     expect(store.settings.tempo).toBe(1.25);
-    expect(store.best('fur-elise', 'hard', 1.25)?.score).toBe(4200);
+    expect(store.best('rhythm', 'fur-elise', 'hard', 1.25)?.score).toBe(4200);
     expect(store.persistent).toBe(false);
     expect(onUnavailable).toHaveBeenCalledTimes(1);
     warn.mockRestore();
@@ -147,8 +213,8 @@ describe('save store', () => {
   it('hands out copies, so callers cannot change the save behind its back', () => {
     const store = createSaveStore({ storage: () => memoryStorage(), now });
     store.recordResults(run);
-    const best = store.best('fur-elise', 'hard', 1.25);
+    const best = store.best('rhythm', 'fur-elise', 'hard', 1.25);
     if (best) best.score = 1;
-    expect(store.best('fur-elise', 'hard', 1.25)?.score).toBe(4200);
+    expect(store.best('rhythm', 'fur-elise', 'hard', 1.25)?.score).toBe(4200);
   });
 });
