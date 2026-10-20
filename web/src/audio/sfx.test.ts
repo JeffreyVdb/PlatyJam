@@ -537,14 +537,14 @@ describe('headroom', () => {
   it('ducks no one-shot by 1 dB on a fast run: 20 tiles a second, doubles, long tiles, a combo', () => {
     const { fake, player, wait, judge } = driven();
     for (let n = 0; n < 60; n += 1) {
-      judge({ unit: 'tap', judgment: 'clear', combo: n === 30 ? 50 : n + 1 });
+      judge({ unit: 'tap', judgment: 'clear', combo: n === 30 ? 50 : 1 });
       if (n % 4 === 0) {
         // A double: the second finger a few ms later.
         wait(0.004);
-        judge({ unit: 'tap', judgment: 'clear', combo: n + 1 });
+        judge({ unit: 'tap', judgment: 'clear', combo: 1 });
       }
       if (n % 10 === 5) player.fill(0.45);
-      if (n % 10 === 4) judge({ unit: 'tail', judgment: 'clear', combo: n + 1 });
+      if (n % 10 === 4) judge({ unit: 'tail', judgment: 'clear', combo: 1 });
       wait(n % 4 === 0 ? 0.046 : 0.05);
     }
     // A one-shot's duck is its gain's value (a fill's is in its automation). One is

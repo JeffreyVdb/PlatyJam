@@ -105,7 +105,7 @@ Everything under `web/src/audio/`. The pure maths has no Web Audio imports and i
 | `backing-player.ts` | The recording of the chosen song, with the accompaniment's lifecycle: `load`, `play`, `pause`, `resume`, `stopAll`, `reset`                                                                                                                     |
 | `calibration*.ts`   | Calibration statistics, and saving the offsets                                                                                                                                                                                                  |
 | `submix.ts`         | A group of voices with its own volume: a gain into the master, rebuilt when the context is recreated                                                                                                                                            |
-| `sfx.ts`            | Tiles' sound effects: pure renderers (`renderEffect`, `renderFillLoop`) and the player that plays them on the Effects submix (see [Sound effects](#sound-effects))                                                                              |
+| `sfx.ts`            | Tiles' sound effects: pure renderers (`renderEffect`, `renderFillLoop`, `remainingPeaks`) and the player that plays them on the Effects submix within a peak budget (see [Sound effects](#sound-effects))                                       |
 | `game-audio.ts`     | Wires engine, pianos, accompaniment, recording and effects together: the player's piano plays into the master, the accompaniment's own piano (same samples) and the recording through a submix, the effects through another; `main.ts` calls it |
 
 ### The song's recording
