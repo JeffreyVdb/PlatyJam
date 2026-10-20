@@ -13,6 +13,7 @@ function fakeAudio() {
     stats: () => ({ scheduled: 0, skipped: 0, lastLeadMs: 0 }),
   };
   const backing = { stopAll: vi.fn(), play: vi.fn(), pause: vi.fn(), resume: vi.fn() };
+  const effects = { play: vi.fn(), fill: vi.fn(), stopAll: vi.fn() };
   const engine = {
     context: { currentTime: 0 },
     events: { on: noop },
@@ -29,11 +30,12 @@ function fakeAudio() {
     piano,
     accompaniment,
     backing,
+    effects,
     samples: { progress: { loaded: 0, failed: 0, total: 88 } },
     setTuning: noop,
     activeVoices: () => 0,
   } as unknown as GameAudio;
-  return { audio, piano, accompaniment, backing, engine };
+  return { audio, piano, accompaniment, backing, effects, engine };
 }
 
 describe('the debug Audio section', () => {
@@ -55,6 +57,32 @@ describe('the debug Audio section', () => {
     expect(fake.accompaniment.stopAll).toHaveBeenCalledWith(200);
     expect(fake.piano.stopAll).toHaveBeenCalledWith(200);
     expect(fake.backing.stopAll).toHaveBeenCalledWith(200);
+    expect(fake.effects.stopAll).toHaveBeenCalledWith(200);
+  });
+
+  it('plays each sound effect from its own button', () => {
+    vi.useFakeTimers();
+    const fake = fakeAudio();
+    const section = createAudioDebugSection({
+      audio: fake.audio,
+      openCalibration: () => undefined,
+    });
+    const row = section.querySelector('[aria-labelledby="debug-effects-caption"]');
+    const named = (label: string) =>
+      [...(row?.querySelectorAll('button') ?? [])].find((node) => node.textContent === label);
+    expect([...(row?.querySelectorAll('button') ?? [])].map((node) => node.textContent)).toEqual([
+      'Tap',
+      'Clear',
+      'Complete',
+      'Miss',
+      'Combo',
+      'Fill',
+    ]);
+    named('Tap')?.click();
+    named('Combo')?.click();
+    expect(fake.effects.play.mock.calls).toEqual([['tap'], ['combo']]);
+    named('Fill')?.click();
+    expect(fake.effects.fill).toHaveBeenCalledWith(2);
   });
 
   it('shows the output latency in milliseconds, and "unknown" when there is none', () => {
