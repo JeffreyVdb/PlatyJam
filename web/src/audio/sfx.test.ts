@@ -1,17 +1,22 @@
 import { describe, expect, it } from 'vitest';
+import { effectCues } from '../game/effect-cues';
 import { MASTER_GAIN } from './engine';
 import {
   createEffectsPlayer,
   EFFECT_GAIN,
   EFFECT_LENGTH_S,
-  type Effect,
   EFFECTS,
+  EFFECTS_PEAK_BUDGET,
+  FILL_FILTER_GAIN,
+  type FillVoice,
   fillCutoffAt,
   fillLevelAt,
   MAX_EFFECT_VOICES,
   renderEffect,
+  remainingPeaks,
   renderFillLoop,
   REPEAT_WINDOW_S,
+  START_SLACK_S,
   STEAL_FADE_S,
 } from './sfx';
 
@@ -90,86 +95,8 @@ describe('renderFillLoop', () => {
   });
 });
 
-/**
- * The Effects bus, mixed offline the way the player plays it: the repeat window,
- * the voice cap and the steal fade applied. `at` in seconds.
- */
-const MIX_RATE = 48000;
-const rendered = new Map(EFFECTS.map((effect) => [effect, renderEffect(effect, MIX_RATE)]));
-
-function mixRun(cues: readonly { at: number; effect: Effect }[]) {
-  const sampleRate = MIX_RATE;
-  const end = Math.max(...cues.map(({ at, effect }) => at + EFFECT_LENGTH_S[effect])) + 0.01;
-  const out = new Float32Array(Math.ceil(end * sampleRate));
-  const voices: { effect: Effect; at: number; stopAt: number }[] = [];
-  for (const { at, effect } of [...cues].sort((a, b) => a.at - b.at)) {
-    const live = voices.filter(
-      (v) => v.stopAt === Infinity && at < v.at + EFFECT_LENGTH_S[v.effect],
-    );
-    if (live.some((v) => v.effect === effect && at - v.at < REPEAT_WINDOW_S)) continue;
-    if (live.length >= MAX_EFFECT_VOICES) {
-      const oldest = live.reduce((a, b) => (b.at < a.at ? b : a));
-      oldest.stopAt = at + STEAL_FADE_S;
-    }
-    voices.push({ effect, at, stopAt: Infinity });
-  }
-  for (const { effect, at, stopAt } of voices) {
-    const data = rendered.get(effect) ?? new Float32Array();
-    const offset = Math.round(at * sampleRate);
-    for (let i = 0; i < data.length; i += 1) {
-      const t = at + i / sampleRate;
-      if (t >= stopAt) break;
-      const fade = stopAt === Infinity ? 1 : Math.min(1, (stopAt - t) / STEAL_FADE_S);
-      const k = offset + i;
-      out[k] = (out[k] ?? 0) + (data[i] ?? 0) * fade;
-    }
-  }
-  return out;
-}
-
 /** What the Effects bus reaches at the output: through the master gain at full volume. */
 const atOutput = (busPeak: number, effectsVolume = 1) => busPeak * effectsVolume * MASTER_GAIN;
-
-describe('headroom', () => {
-  it('stays far below full scale on a fast run: 20 tiles a second, doubles, a combo', () => {
-    const cues: { at: number; effect: Effect }[] = [];
-    for (let n = 0; n < 60; n += 1) {
-      const at = n / 20;
-      cues.push({ at, effect: 'tap' }, { at, effect: 'clear' });
-      // A double: the second finger a few ms later.
-      if (n % 4 === 0)
-        cues.push({ at: at + 0.004, effect: 'tap' }, { at: at + 0.004, effect: 'clear' });
-      if (n % 10 === 9) cues.push({ at: at + 0.02, effect: 'complete' });
-    }
-    cues.push({ at: 1.5, effect: 'combo' }, { at: 3, effect: 'miss' }, { at: 3, effect: 'miss' });
-    // At full Effects and master volume: under −4.4 dBFS (measured: −5.5).
-    expect(atOutput(peakOf(mixRun(cues)))).toBeLessThan(0.6);
-  });
-
-  it('never clips, even with every effect starting within the repeat window', () => {
-    // The most there can be: each one-shot once (the repeat window stops a second),
-    // at full Effects and master volume, at many relative offsets.
-    const steps = [0, 0.005, 0.01, 0.02, REPEAT_WINDOW_S];
-    let worst = 0;
-    const [first, ...others] = EFFECTS;
-    const offsets = (k: number): number[][] =>
-      k === 0 ? [[]] : offsets(k - 1).flatMap((rest) => steps.map((at) => [...rest, at]));
-    for (const ats of offsets(others.length)) {
-      const cues = [
-        { at: 0, effect: first },
-        ...others.map((effect, k) => ({ at: ats[k] ?? 0, effect })),
-      ];
-      worst = Math.max(worst, peakOf(mixRun(cues)));
-    }
-    expect(atOutput(worst)).toBeLessThan(1);
-  });
-
-  it('keeps everything at once under full scale at the default Effects volume', () => {
-    // A bound, not a mix: every one-shot and a fill at their peaks in the same sample.
-    const sum = EFFECTS.reduce((total, effect) => total + EFFECT_GAIN[effect], EFFECT_GAIN.fill);
-    expect(atOutput(sum, 0.7)).toBeLessThan(1);
-  });
-});
 
 // ---- the player, on a fake context ----
 
@@ -202,7 +129,13 @@ class FakeNode {
 }
 
 class FakeSource extends FakeNode {
-  buffer: { length: number; sampleRate: number } | null = null;
+  buffer: { length: number; sampleRate: number; getChannelData: () => Float32Array } | null = null;
+  /** The context's `currentTime` when it was created. */
+  readonly createdAt: number;
+  constructor(createdAt: number) {
+    super();
+    this.createdAt = createdAt;
+  }
   loop = false;
   onended: (() => void) | null = null;
   startArgs: number[] | undefined;
@@ -222,7 +155,7 @@ class FakeSource extends FakeNode {
 function fakeContext(sampleRate = 48000) {
   const sources: FakeSource[] = [];
   const gains: { gain: FakeParam }[] = [];
-  const filters: { type: string; Q: FakeParam; frequency: FakeParam }[] = [];
+  const filters: (FakeNode & { type: string; Q: FakeParam; frequency: FakeParam })[] = [];
   const created: number[] = [];
   const context = {
     sampleRate,
@@ -234,7 +167,7 @@ function fakeContext(sampleRate = 48000) {
       return { length, sampleRate: rate, getChannelData: () => data };
     },
     createBufferSource: () => {
-      const source = new FakeSource();
+      const source = new FakeSource(context.currentTime);
       sources.push(source);
       return source;
     },
@@ -419,4 +352,235 @@ describe('createEffectsPlayer', () => {
     expect(created).toHaveLength(1);
     expect(next.created).toHaveLength(0);
   });
+});
+
+// ---- the player's output, mixed from what it asked the fake context for ----
+
+/** A fake param's value at `t`: `value`, then its set and linear/exponential ramps. */
+function automation(param: FakeParam): (t: number) => number {
+  let events: { kind: string; v: number; t: number }[] = [];
+  for (const [kind, v = 0, t = 0] of param.calls) {
+    if (kind === 'cancel') events = events.filter((e) => e.t < v);
+    else events.push({ kind, v, t });
+  }
+  return (t) => {
+    let previous = { t: -Infinity, v: param.value };
+    for (const event of events) {
+      if (t < event.t) {
+        if (event.kind === 'set' || previous.t === -Infinity) return previous.v;
+        const f = (t - previous.t) / (event.t - previous.t);
+        return event.kind === 'exp'
+          ? previous.v * (event.v / previous.v) ** f
+          : previous.v + (event.v - previous.v) * f;
+      }
+      previous = event;
+    }
+    return previous.v;
+  };
+}
+
+/** When a fake source stops sounding: its stop, or the end of its buffer. */
+const endOf = (source: FakeSource) =>
+  source.stoppedAt ??
+  (source.loop || !source.buffer
+    ? Infinity
+    : Math.max(source.startArgs?.[0] ?? 0, source.createdAt) +
+      source.buffer.length / source.buffer.sampleRate);
+
+/**
+ * What the fake context would have played, at its sample rate: every source from its
+ * start, through its low-pass (a fill's: RBJ, as Web Audio computes it, the cutoff
+ * swept) and its gain automation. Each voice is `delay()` s later than the player
+ * thought, as when `currentTime` was stale.
+ */
+function mixPlayed(fake: ReturnType<typeof fakeContext>, delay: () => number = () => 0) {
+  const { sampleRate } = fake.context;
+  const voices = fake.sources.flatMap((source) => {
+    if (!source.buffer || !source.startArgs) return [];
+    const next = source.connected[0];
+    const filter = fake.filters.find((f) => f === next);
+    const gainNode = fake.gains.find((g) => g === (filter ? filter.connected[0] : next));
+    if (!gainNode) return [];
+    const start = Math.max(source.startArgs[0] ?? 0, source.createdAt);
+    return [{ source, filter, gain: automation(gainNode.gain), start, at: start + delay() }];
+  });
+  const t0 = Math.min(...voices.map((v) => v.start));
+  const end = Math.max(...voices.map((v) => endOf(v.source) + (v.at - v.start)));
+  const out = new Float32Array(Math.ceil((end - t0) * sampleRate) + 1);
+  for (const { source, filter, gain, start, at } of voices) {
+    const data = source.buffer?.getChannelData() ?? new Float32Array();
+    const cutoff = filter && automation(filter.frequency);
+    const resonance = filter ? 10 ** (filter.Q.value / 20) : 1;
+    let [x1, x2, y1, y2, b0, b1, a1, a2] = [0, 0, 0, 0, 0, 0, 0, 0];
+    const first = Math.round((at - t0) * sampleRate);
+    const stop = endOf(source);
+    for (let n = 0; ; n += 1) {
+      // The time the player scheduled this sample for.
+      const t = start + n / sampleRate;
+      if (t >= stop || (!source.loop && n >= data.length)) break;
+      let x = data[n % data.length] ?? 0;
+      if (cutoff) {
+        if (n % 128 === 0) {
+          // New coefficients each render quantum: the sweep is slow.
+          const w0 = (2 * Math.PI * cutoff(t)) / sampleRate;
+          const alpha = Math.sin(w0) / (2 * resonance);
+          const cos = Math.cos(w0);
+          [b0, b1, a1, a2] = [(1 - cos) / 2, 1 - cos, -2 * cos, 1 - alpha].map(
+            (c) => c / (1 + alpha),
+          ) as [number, number, number, number];
+        }
+        const y = b0 * (x + x2) + b1 * x1 - a1 * y1 - a2 * y2;
+        [x2, x1, y2, y1] = [x1, x, y1, y];
+        x = y;
+      }
+      const k = first + n;
+      if (k < out.length) out[k] = (out[k] ?? 0) + x * gain(t);
+    }
+  }
+  return out;
+}
+
+/** A player on a fake context, and a clock that ends each voice when it would. */
+function driven(sampleRate = 48000) {
+  const fake = fakeContext(sampleRate);
+  const player = createEffectsPlayer({
+    context: fake.context as unknown as BaseAudioContext,
+    output: {} as AudioNode,
+  });
+  const wait = (seconds: number) => {
+    fake.context.currentTime += seconds;
+    for (const source of fake.sources) {
+      if (endOf(source) <= fake.context.currentTime) source.end();
+    }
+  };
+  const judge = (event: Parameters<typeof effectCues>[0]) => {
+    for (const effect of effectCues(event, 'tiles').oneShots) player.play(effect);
+  };
+  return { fake, player, wait, judge };
+}
+
+/** Seeded uniform [0, 1) (mulberry32), so a failing search can be replayed. */
+function random(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), a | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 2 ** 32;
+  };
+}
+
+describe('headroom', () => {
+  it('keeps the budget under full scale through the master gain', () => {
+    expect(EFFECTS_PEAK_BUDGET * MASTER_GAIN).toBeLessThan(1);
+    // Every one-shot alone fits, so a lone effect is never ducked.
+    for (const effect of EFFECTS) {
+      expect(EFFECT_GAIN[effect]).toBeLessThan(EFFECTS_PEAK_BUDGET);
+    }
+  });
+
+  it('counts the peak still to come in a one-shot from every millisecond on', () => {
+    for (const sampleRate of RATES) {
+      for (const effect of EFFECTS) {
+        const data = renderEffect(effect, sampleRate);
+        const tail = remainingPeaks(data, sampleRate);
+        expect(tail[0]).toBe(peakOf(data));
+        for (let i = 0; i < data.length; i += 1) {
+          const ms = Math.floor((i * 1000) / sampleRate);
+          expect(Math.abs(data[i] ?? 0)).toBeLessThanOrEqual(tail[ms] ?? 0);
+        }
+        for (let k = 1; k < tail.length; k += 1) {
+          expect(tail[k]).toBeLessThanOrEqual(tail[k - 1] ?? 0);
+        }
+      }
+    }
+  });
+
+  it('bounds the fill through its low-pass: no cutoff of the sweep overshoots more', () => {
+    // The L1 norm of the RBJ low-pass's impulse response (Web Audio's, Q in dB) bounds
+    // its output for any input of peak 1.
+    for (const sampleRate of RATES) {
+      for (let hz = fillCutoffAt(0); hz <= fillCutoffAt(1); hz *= 1.01) {
+        const w0 = (2 * Math.PI * hz) / sampleRate;
+        const alpha = Math.sin(w0) / (2 * 10 ** (-3 / 20));
+        const cos = Math.cos(w0);
+        let [x1, x2, y1, y2, norm] = [0, 0, 0, 0, 0];
+        for (let n = 0; n < 4000; n += 1) {
+          const x = n === 0 ? 1 : 0;
+          const y =
+            (((1 - cos) / 2) * (x + x2) + (1 - cos) * x1 + 2 * cos * y1 - (1 - alpha) * y2) /
+            (1 + alpha);
+          [x2, x1, y2, y1] = [x1, x, y1, y];
+          norm += Math.abs(y);
+        }
+        expect(norm).toBeLessThanOrEqual(FILL_FILTER_GAIN);
+      }
+    }
+  });
+
+  it('plays a fast pile-up under full scale (the round-1 counterexample)', () => {
+    // A tap reaches combo 50; 5120 samples later a held tile completes, another is
+    // tapped and an empty press misses. At round 1 this reached +1.07 dBFS.
+    const { fake, wait, judge } = driven();
+    judge({ unit: 'tap', judgment: 'clear', combo: 50 });
+    wait(5120 / 48000);
+    judge({ unit: 'tail', judgment: 'clear', combo: 51 });
+    judge({ unit: 'tap', judgment: 'clear', combo: 52 });
+    judge({ unit: 'empty', judgment: 'miss', combo: 0 });
+    expect(atOutput(peakOf(mixPlayed(fake)))).toBeLessThan(1);
+    // The ones already sounding and the newcomers that fit keep their level. The miss,
+    // last in, would play 21 dB down under them, so it is dropped.
+    expect(fake.sources).toHaveLength(6);
+    expect(fake.gains.every((node) => node.gain.value === 1)).toBe(true);
+  });
+
+  it('ducks no one-shot by 1 dB on a fast run: 20 tiles a second, doubles, long tiles, a combo', () => {
+    const { fake, player, wait, judge } = driven();
+    for (let n = 0; n < 60; n += 1) {
+      judge({ unit: 'tap', judgment: 'clear', combo: n === 30 ? 50 : n + 1 });
+      if (n % 4 === 0) {
+        // A double: the second finger a few ms later.
+        wait(0.004);
+        judge({ unit: 'tap', judgment: 'clear', combo: n + 1 });
+      }
+      if (n % 10 === 5) player.fill(0.45);
+      if (n % 10 === 4) judge({ unit: 'tail', judgment: 'clear', combo: n + 1 });
+      wait(n % 4 === 0 ? 0.046 : 0.05);
+    }
+    // A one-shot's duck is its gain's value (a fill's is in its automation). One is
+    // ducked, by 0.6 dB: a completion on a fill, at the end of the combo.
+    const ducks = fake.gains.map((node) => node.gain.value).filter((level) => level < 1);
+    expect(Math.min(...ducks)).toBeGreaterThan(10 ** (-1 / 20));
+    // At full Effects and master volume (measured: −3.0 dBFS).
+    expect(atOutput(peakOf(mixPlayed(fake)))).toBeLessThan(0.75);
+  });
+
+  it('never clips, whatever plays when: a seeded search over full lifetimes', () => {
+    // Judgments in any order and at any spacing, a combo on any of them, fills of any
+    // length, each voice really starting up to START_SLACK_S late: more than the game
+    // can produce. At full Effects and master volume.
+    const units = ['tap', 'head', 'tail', 'empty'] as const;
+    let worst = 0;
+    for (let seed = 1; seed <= 100; seed += 1) {
+      const next = random(seed);
+      const { fake, player, wait, judge } = driven(seed % 2 ? 48000 : 44100);
+      const fills: FillVoice[] = [];
+      for (let n = 0; n < 40; n += 1) {
+        const r = next();
+        // Together, within a repeat window, or anywhere over the longest lifetime.
+        wait(r < 0.3 ? 0 : r < 0.7 ? next() * 0.03 : next() * 0.3);
+        const unit = units[Math.floor(next() * units.length)] ?? 'tap';
+        const judgment = unit === 'empty' || next() < 0.25 ? 'miss' : 'clear';
+        judge({ unit, judgment, combo: next() < 0.3 ? 50 : 1 });
+        if (unit === 'head' && judgment === 'clear') {
+          const when = fake.context.currentTime + next() * 0.3;
+          fills.push(player.fill(0.1 + next() * 0.9, { when }));
+        }
+        if (unit === 'tail') fills.splice(Math.floor(next() * fills.length), 1)[0]?.stop();
+      }
+      worst = Math.max(worst, peakOf(mixPlayed(fake, () => next() * START_SLACK_S)));
+    }
+    // Measured: −2.0 dBFS. Without the budget this search finds +1.1 dBFS.
+    expect(atOutput(worst)).toBeLessThan(1);
+  }, 20_000);
 });

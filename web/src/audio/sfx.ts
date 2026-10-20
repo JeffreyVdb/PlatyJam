@@ -10,12 +10,14 @@
  * Guidelines: nothing pitched may clash with the song. The tap and the fill are
  * tuned noise (a band, no pitch class), the clears are inharmonic partials above
  * 3.9 kHz that read as sparkle, and the miss and combo are glides with no fixed
- * pitch. Each sits below the music, and a fast run of them cannot clip the
- * Effects bus (`effects.test.ts` mixes the worst cases).
+ * pitch. Each sits below the music, and no pile-up of them can clip: the player
+ * ducks a newcomer to fit `EFFECTS_PEAK_BUDGET` (`sfx.test.ts` mixes the worst cases).
  *
  * The recipes are a starting point from research, not yet tuned by ear: each
  * effect's level is one constant in `EFFECT_GAIN`.
  */
+
+import { MASTER_GAIN } from './engine';
 
 /** The one-shot effects. `fill` is separate: it lasts as long as a long tile fills. */
 export const EFFECTS = ['tap', 'clear', 'complete', 'miss', 'combo'] as const;
@@ -24,9 +26,9 @@ export type Effect = (typeof EFFECTS)[number];
 /**
  * Each effect's peak, linear, before the Effects volume (default 0.7) and the master
  * gain: the rendered sound is scaled to exactly this. For the fill, its level once
- * the long tile is full. The research's starting levels, 2 dB lower (× 0.8), so that
- * even every effect starting at once stays under full scale through the master gain
- * (`sfx.test.ts`, "headroom"). Tune them here after listening on the iPad.
+ * the long tile is full. The research's starting levels, 2 dB lower (× 0.8). A sound
+ * plays at this level unless it lands on a pile-up the budget has no room for
+ * (`EFFECTS_PEAK_BUDGET`). Tune them here after listening on the iPad.
  */
 export const EFFECT_GAIN: Readonly<Record<Effect | 'fill', number>> = {
   tap: 0.28,
@@ -48,10 +50,31 @@ export const EFFECT_LENGTH_S: Readonly<Record<Effect, number>> = {
 
 /**
  * Voices sounding at once, one-shots and fills together. A new one beyond this fades
- * the oldest out over `STEAL_FADE_S`: the safety net under a fast run. (No
- * compressor: its look-ahead would delay the tap.)
+ * the oldest out over `STEAL_FADE_S`. The level is kept by `EFFECTS_PEAK_BUDGET`.
  */
 export const MAX_EFFECT_VOICES = 6;
+/**
+ * The most the Effects bus may reach: the peaks every voice can still play, summed,
+ * stay within this. Through the master gain at full volume that is 0.96 (−0.35
+ * dBFS), at any timing of any effects, so nothing clips. A new voice that does not
+ * fit plays quieter, at once: the ones already sounding keep their level, and a lone
+ * effect is never ducked. (No compressor: its look-ahead would delay the tap.)
+ */
+export const EFFECTS_PEAK_BUDGET = 0.96 / MASTER_GAIN;
+/**
+ * How much later a voice may really start than the `currentTime` it was started at
+ * (the clock moves in render callbacks, up to 1024 frames). A voice is counted as
+ * this much less far along than it seems, so its peak still to come is never
+ * underestimated.
+ */
+export const START_SLACK_S = 0.025;
+/**
+ * A low-pass with no resonance still overshoots a little: noise of peak 1 through the
+ * fill's comes out at most this (its impulse response's L1 norm, 1.12 over the sweep).
+ */
+export const FILL_FILTER_GAIN = 1.15;
+/** A new voice the budget would duck below this is dropped: the rest would mask it. */
+const MIN_DUCK = 0.1;
 /**
  * The same effect started again within this many seconds plays once: a double's two
  * taps, or the head and tail Miss of a long tile lost whole, are one sound, not one
@@ -216,6 +239,24 @@ const RENDERERS: Readonly<Record<Effect, (data: Float32Array, sampleRate: number
   },
 };
 
+/**
+ * The peak still to come in `data` from each millisecond on: entry `k` is the largest
+ * |sample| from `k` ms to the end. It only falls, so the budget can sum it.
+ */
+export function remainingPeaks(data: Float32Array, sampleRate: number): Float32Array {
+  const ms = Math.ceil((data.length * 1000) / sampleRate);
+  const tail = new Float32Array(ms);
+  let peak = 0;
+  let i = data.length - 1;
+  for (let k = ms - 1; k >= 0; k -= 1) {
+    for (const from = Math.floor((k * sampleRate) / 1000); i >= from; i -= 1) {
+      peak = Math.max(peak, Math.abs(data[i] ?? 0));
+    }
+    tail[k] = peak;
+  }
+  return tail;
+}
+
 /** One effect at `sampleRate`: mono samples, peak `EFFECT_GAIN[effect]`. */
 export function renderEffect(effect: Effect, sampleRate: number): Float32Array {
   const data = new Float32Array(Math.round(EFFECT_LENGTH_S[effect] * sampleRate));
@@ -325,9 +366,25 @@ interface Voice {
   readonly gain: GainNode;
   /** Context seconds. */
   readonly start: number;
+  /** Context seconds: when it ends, or ends its fade. */
+  end: number;
   /** The gain's automation, mirrored, so a fade starts from the level it is at. */
   readonly envelope: Point[];
+  /**
+   * A one-shot's gain: its peak still to come is this times `tail`, its
+   * `remainingPeaks`. A fill's peak, its gain and low-pass included.
+   */
+  readonly level: number;
+  readonly tail?: Float32Array;
   stopping: boolean;
+}
+
+/** The most `voice` can still add to the bus from `now` on, linear. */
+function stillToCome(voice: Voice, now: number): number {
+  if (now > voice.end + START_SLACK_S) return 0;
+  if (!voice.tail) return voice.level;
+  const ms = Math.max(0, Math.floor((now - voice.start - START_SLACK_S) * 1000));
+  return voice.level * (voice.tail[ms] ?? 0);
 }
 
 function toBuffer(ctx: BaseAudioContext, data: Float32Array): AudioBuffer {
@@ -339,14 +396,15 @@ function toBuffer(ctx: BaseAudioContext, data: Float32Array): AudioBuffer {
 /**
  * Plays the effects into `target.output` (the Effects submix): one
  * AudioBufferSourceNode and GainNode per voice. A one-shot's gain stays at 1 (its
- * level is in its samples) until it is faded; a fill also runs through a band-pass.
+ * level is in its samples), or at its duck, until it is faded; a fill also runs
+ * through a low-pass.
  */
 export function createEffectsPlayer(target: {
   readonly context: BaseAudioContext;
   readonly output: AudioNode;
 }): EffectsPlayer {
   // AudioBuffers work in any context, so these survive a recreated context.
-  const buffers = new Map<Effect, AudioBuffer>();
+  const buffers = new Map<Effect, { buffer: AudioBuffer; tail: Float32Array }>();
   let fillLoop: AudioBuffer | undefined;
   let voices: Voice[] = [];
 
@@ -358,6 +416,7 @@ export function createEffectsPlayer(target: {
     if (voice.stopping) return;
     voice.stopping = true;
     const now = target.context.currentTime;
+    voice.end = Math.min(voice.end, Math.max(now, voice.start) + fadeS);
     if (voice.start > now) {
       // Not started yet: stopping at its start means it never sounds.
       voice.source.stop(voice.start);
@@ -372,14 +431,9 @@ export function createEffectsPlayer(target: {
     voice.source.stop(now + fadeS);
   };
 
-  const start = (
-    kind: Voice['kind'],
-    source: AudioBufferSourceNode,
-    gain: GainNode,
-    envelope: Point[],
-    when: number,
-  ) => {
-    const voice: Voice = { kind, source, gain, start: when, envelope, stopping: false };
+  const start = (fields: Omit<Voice, 'stopping'>) => {
+    const voice: Voice = { ...fields, stopping: false };
+    const { source, gain } = voice;
     source.onended = () => {
       source.disconnect();
       gain.disconnect();
@@ -387,6 +441,17 @@ export function createEffectsPlayer(target: {
     };
     voices.push(voice);
     return voice;
+  };
+
+  /**
+   * The gain a new voice peaking at `peak` may play at, so that the peaks still to
+   * come stay within `EFFECTS_PEAK_BUDGET`: 1 when there is room, 0 to drop it.
+   */
+  const roomFor = (peak: number) => {
+    const now = target.context.currentTime;
+    const used = voices.reduce((sum, voice) => sum + stillToCome(voice, now), 0);
+    const gain = Math.min(1, (EFFECTS_PEAK_BUDGET - used) / peak);
+    return gain >= MIN_DUCK ? gain : 0;
   };
 
   /** Makes room for one more voice under the cap, fading the oldest out. */
@@ -399,12 +464,13 @@ export function createEffectsPlayer(target: {
 
   const bufferFor = (effect: Effect) => {
     const ctx = target.context;
-    let buffer = buffers.get(effect);
-    if (!buffer) {
-      buffer = toBuffer(ctx, renderEffect(effect, ctx.sampleRate));
-      buffers.set(effect, buffer);
+    let rendered = buffers.get(effect);
+    if (!rendered) {
+      const data = renderEffect(effect, ctx.sampleRate);
+      rendered = { buffer: toBuffer(ctx, data), tail: remainingPeaks(data, ctx.sampleRate) };
+      buffers.set(effect, rendered);
     }
-    return buffer;
+    return rendered;
   };
 
   const loop = () => {
@@ -423,12 +489,26 @@ export function createEffectsPlayer(target: {
       if (voices.some((v) => v.kind === effect && !v.stopping && now - v.start < REPEAT_WINDOW_S)) {
         return;
       }
+      const { buffer, tail } = bufferFor(effect);
+      const level = roomFor(EFFECT_GAIN[effect]);
+      if (level === 0) return;
       makeRoom();
       const source = ctx.createBufferSource();
-      source.buffer = bufferFor(effect);
+      source.buffer = buffer;
       const gain = ctx.createGain();
+      gain.gain.value = level;
       source.connect(gain).connect(target.output);
-      start(effect, source, gain, [{ t: now, v: 1 }], now);
+      const end = now + buffer.length / buffer.sampleRate;
+      start({
+        kind: effect,
+        source,
+        gain,
+        start: now,
+        end,
+        envelope: [{ t: now, v: level }],
+        level,
+        tail,
+      });
       // 0 is "at once", with no stale `currentTime` in the way.
       source.start(0);
     },
@@ -438,6 +518,9 @@ export function createEffectsPlayer(target: {
       const now = ctx.currentTime;
       const remaining = durationS - Math.max(0, offsetS);
       if (!(remaining > 0) || !running()) return { stop: () => undefined };
+      const peak = EFFECT_GAIN.fill * FILL_FILTER_GAIN;
+      const level = roomFor(peak);
+      if (level === 0) return { stop: () => undefined };
       makeRoom();
       const begin = Math.max(when ?? now, now);
       const end = begin + remaining;
@@ -457,14 +540,22 @@ export function createEffectsPlayer(target: {
       const fadeOut = Math.min(FILL_FADE_OUT_S, remaining / 3);
       const envelope = [
         { t: begin, v: 0 },
-        { t: begin + fadeIn, v: fillLevelAt(from + ((1 - from) * fadeIn) / remaining) },
-        { t: end - fadeOut, v: fillLevelAt(1 - fadeOut / durationS) },
+        { t: begin + fadeIn, v: level * fillLevelAt(from + ((1 - from) * fadeIn) / remaining) },
+        { t: end - fadeOut, v: level * fillLevelAt(1 - fadeOut / durationS) },
         { t: end, v: 0 },
       ];
       gain.gain.setValueAtTime(0, begin);
       for (const { t, v } of envelope.slice(1)) gain.gain.linearRampToValueAtTime(v, t);
       source.connect(opening).connect(gain).connect(target.output);
-      const voice = start('fill', source, gain, envelope, begin);
+      const voice = start({
+        kind: 'fill',
+        source,
+        gain,
+        start: begin,
+        end,
+        envelope,
+        level: level * peak,
+      });
       source.start(begin);
       source.stop(end);
       return {
