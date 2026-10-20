@@ -37,9 +37,9 @@ export const GAMES: Record<GameMode, GameInfo> = {
     icon: tilesIcon,
     line: "Tap every tile before it falls off the screen. Timing doesn't matter.",
     steps: [
-      'Tap any black tile, anywhere on it.',
+      'Tap the lowest tile first, anywhere on it. The next one is tinted.',
       'Hold long tiles until they fill up.',
-      "Don't let a tile fall off, and don't tap the water.",
+      "A tile that shakes isn't next yet. Don't let one fall off, or tap the water.",
     ],
     failHints: {
       classic: 'A tile that falls off, or a tap on empty space, ends the song.',

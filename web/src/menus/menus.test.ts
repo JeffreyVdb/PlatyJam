@@ -1069,9 +1069,9 @@ describe('menus', () => {
         expect(
           [...(intro()?.querySelectorAll('.intro-step') ?? [])].map((n) => n.textContent),
         ).toEqual([
-          'Tap any black tile, anywhere on it.',
+          'Tap the lowest tile first, anywhere on it. The next one is tinted.',
           'Hold long tiles until they fill up.',
-          "Don't let a tile fall off, and don't tap the water.",
+          "A tile that shakes isn't next yet. Don't let one fall off, or tap the water.",
         ]);
         expect(intro()?.querySelector('.preview--tiles')).not.toBeNull();
         expect(q('.screen--songs').inert).toBe(true);
