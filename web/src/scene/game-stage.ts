@@ -346,9 +346,10 @@ export function createGameStage({
     age: new Float64Array(MAX_COMPLETIONS),
     count: 0,
   };
-  /** Tiles: long tiles whose completion has rippled, in the run of `celebratedIn`. */
+  /** Tiles: long tiles whose completion has rippled, in the run of `runIn`. */
   const celebrated = new Set<number>();
-  let celebratedIn: Simulation | undefined;
+  /** The run Tiles' effects belong to: each run (restart, retry, new song) has its own. */
+  let runIn: Simulation | undefined;
 
   const build = (): Resources => {
     builds += 1;
@@ -575,6 +576,25 @@ export function createGameStage({
   };
 
   /**
+   * Tiles: drops another run's effects once a new run is shown. Its pops are timed and
+   * its ripples and droplets placed in its song time, which starts over: they would
+   * come back on water the new run left empty. Rhythm's feedback is timed in real
+   * time at the hit line (`at` NaN) and plays out.
+   */
+  const keepToRun = () => {
+    const run = shown?.simulation;
+    if (run === runIn) return;
+    runIn = run;
+    celebrated.clear();
+    shakeTile = -1;
+    for (const pool of [flashes, ripples, droplets]) {
+      for (let i = 0; i < pool.lane.length; i += 1) {
+        if (!Number.isNaN(pool.at[i] ?? Number.NaN)) pool.lane[i] = -1;
+      }
+    }
+  };
+
+  /**
    * Tiles: how far through its pop (0 to 1) a tile that cleared at song ms `from` is,
    * in song time as the simulation lets a press on it go (`POP_MS` × tempo); NaN when
    * it is not popping. Only while the run goes on: the fail rewind plays no pops back.
@@ -599,10 +619,6 @@ export function createGameStage({
       completions.span[slot] = tile.dur ?? 0;
       completions.age[slot] = age;
       completions.count += 1;
-    }
-    if (celebratedIn !== shown?.simulation) {
-      celebrated.clear();
-      celebratedIn = shown?.simulation;
     }
     if (celebrated.has(index)) return;
     celebrated.add(index);
@@ -976,6 +992,7 @@ export function createGameStage({
   return {
     render(stage, deltaSeconds, renderer) {
       shown = stage;
+      keepToRun();
       clock += deltaSeconds;
       still = reducedMotion();
       if (!still) waterClock += deltaSeconds;
@@ -1005,6 +1022,7 @@ export function createGameStage({
     },
 
     onJudgment(event) {
+      keepToRun();
       const config = shown?.config;
       if (event.judgment !== 'miss' && config?.mode === 'tiles') {
         laneSnag[event.lane] = -Infinity;
@@ -1044,6 +1062,7 @@ export function createGameStage({
     },
 
     onNotYet(event) {
+      keepToRun();
       shakeTile = event.tileIndex;
       shakeBorn = clock;
     },

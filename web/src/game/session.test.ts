@@ -1402,6 +1402,29 @@ describe('game session', () => {
             expect(session.stats()).toMatchObject({ clear: 2, miss: 1 });
           });
         });
+
+        it('leaves the last run’s pops behind on a restart: their spots are empty water', async () => {
+          await start([tap(500, 0), tap(900, 1), tap(3000, 2)]);
+          playTo(200, 16, stage.draw);
+          touch('a', 0, on(500));
+          touch('b', 1, on(900));
+          stage.draw(0);
+          expect(stage.count('flashes')).toBe(2);
+          session.restart();
+          stage.draw(0);
+          expect(session.state).toBe('leadIn');
+          // The new run clears both tiles early; their pops are over well before 200.
+          playTo(-300, 16, stage.draw);
+          touch('c', 0, on(500));
+          touch('d', 1, on(900));
+          // Where the last run's pops would be halfway through.
+          playTo(200 + POP_MS / 2, 16, stage.draw);
+          expect(stage.count('flashes')).toBe(0);
+          touch('e', 0, on(500));
+          expect(session.state).toBe('failing');
+          expect(failure()).toEqual({ kind: 'emptyTap', lane: 0 });
+          expect(session.stats()).toMatchObject({ clear: 2, miss: 1 });
+        });
       });
     });
   });
