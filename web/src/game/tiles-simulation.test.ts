@@ -8,6 +8,7 @@ import {
   appearTime,
   createTilesSimulation,
   exitTime,
+  POP_MS,
   TILES_RULES,
   type TilesRules,
 } from './tiles-simulation';
@@ -167,8 +168,39 @@ describe('tiles simulation', () => {
       const { sim, summary } = setup([tap(1000, 0), tap(1600, 0)]);
       sim.press('a', 0, 800, at(1000));
       sim.press('b', 0, 820, at(1000));
+      sim.press('c', 0, 800 + POP_MS - 1, at(1000));
       expect(summary()).toEqual(['tap:clear@0#0']);
       expect(sim.status).toBe('running');
+    });
+
+    it('counts a press where a cleared tile was, once its pop is over, as an empty tap', () => {
+      const classic = setup([tap(1000, 0), tap(1600, 1)]);
+      classic.sim.press('a', 0, 100, at(1000));
+      classic.sim.release('a', 120);
+      classic.sim.press('b', 0, 100 + POP_MS, at(1000));
+      expect(classic.summary()).toEqual(['tap:clear@0#0', 'empty:miss@0#-1']);
+      expect(classic.sim.failure).toEqual({ kind: 'emptyTap', lane: 0 });
+
+      const relaxed = setup([tap(1000, 0), tap(1600, 1)], { failMode: 'relaxed' });
+      relaxed.sim.press('a', 0, 100, at(1000));
+      relaxed.sim.press('b', 0, 800, at(1000));
+      expect(relaxed.summary()).toEqual(['tap:clear@0#0', 'empty:miss@0#-1']);
+      expect(relaxed.sim.status).toBe('running');
+      expect(relaxed.sim.score.combo).toBe(0);
+      relaxed.sim.press('c', 1, 900, at(1600));
+      expect(relaxed.summary().at(-1)).toBe('tap:clear@1#1');
+    });
+
+    it('times the pop in real ms, scaled by the tempo', () => {
+      const { sim, summary } = setup([tap(1000, 0), tap(1600, 1)], {
+        tempo: 1.5,
+        failMode: 'relaxed',
+      });
+      sim.press('a', 0, 100, at(1000));
+      sim.press('b', 0, 100 + POP_MS * 1.5 - 1, at(1000));
+      expect(summary()).toEqual(['tap:clear@0#0']);
+      sim.press('c', 0, 100 + POP_MS * 1.5, at(1000));
+      expect(summary()).toEqual(['tap:clear@0#0', 'empty:miss@0#-1']);
     });
 
     it('claims the next tile in a key’s lane, once it has appeared', () => {
@@ -311,6 +343,21 @@ describe('tiles simulation', () => {
       ]);
     });
 
+    it('can be pressed again while held, and until their pop is over once full', () => {
+      const { sim, summary } = setup([hold(1000, 0, 300), tap(2000, 1)], {
+        failMode: 'relaxed',
+      });
+      sim.press('a', 0, 900, at(1000));
+      sim.press('b', 0, 1100, at(1250));
+      sim.release('b', 1110);
+      sim.advance(1300);
+      expect(summary()).toEqual(['head:clear@0#0', 'tail:clear@0#0']);
+      sim.press('c', 0, 1300 + POP_MS - 1, at(1100));
+      expect(summary()).toHaveLength(2);
+      sim.press('d', 0, 1300 + POP_MS, at(1100));
+      expect(summary().at(-1)).toBe('empty:miss@0#-1');
+    });
+
     it('fail when let go before they are full', () => {
       const { sim, summary } = setup([hold(1000, 1, 500), tap(2000, 0)]);
       sim.press('a', 1, 800, at(1000));
@@ -380,8 +427,8 @@ describe('tiles simulation', () => {
       | { kind: 'release'; input: string; at: number };
 
     // A dense passage: a double, early and late claims, a "not yet", keys, long tiles
-    // (one let go early), a tap on a tile already cleared, an empty tap and a tile
-    // that falls off.
+    // (one let go early), presses on a tile already cleared, during its pop and after
+    // it, an empty tap and a tile that falls off.
     const tiles = [
       tap(1000, 0),
       tap(1000, 2),
@@ -417,6 +464,8 @@ describe('tiles simulation', () => {
       { kind: 'press', input: 'p9', lane: 0, at: 2280, aim: 2250 },
       { kind: 'press', input: 'p10', lane: 1, at: 2400, aim: 2430 },
       { kind: 'press', input: 'p11', lane: 1, at: 2410, aim: 2600 },
+      { kind: 'press', input: 'p13', lane: 1, at: 2500, aim: 2600 },
+      { kind: 'press', input: 'p14', lane: 1, at: 2620, aim: 2600 },
       { kind: 'press', input: 'p12', lane: 3, at: 2900, aim: 2800 },
     ];
 
@@ -492,9 +541,11 @@ describe('tiles simulation', () => {
         'tail:miss@2#6',
         'tap:clear@0#7',
         'tap:clear@0#8',
-        // 2430 in lane 1 is water; then tile 9 is claimed early.
+        // 2430 in lane 1 is water; then tile 9 is claimed early, pressed again while
+        // it pops, and once more where it was after its pop.
         'empty:miss@1#-1',
         'tap:clear@1#9',
+        'empty:miss@1#-1',
         'tap:clear@3#10',
       ]);
       expect(notYet).toEqual(['0#2']);

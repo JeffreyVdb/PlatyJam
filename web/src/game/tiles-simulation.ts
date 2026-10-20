@@ -51,6 +51,13 @@ export const TILES_RULES: Readonly<TilesRules> = { laterTile: 'notYet', melody: 
  */
 export const DEFAULT_EXIT_ALONG = 0.13;
 
+/**
+ * Real ms a cleared tile pops for on the stage (its flash), and so how long a press
+ * on it is still a harmless second press (a double-tap, a bouncing finger). After
+ * that the tile is gone, and a press where it was is a tap on the water.
+ */
+export const POP_MS = 180;
+
 /** Chart ms at which a tile at `t` appears at the top of the lane. */
 export function appearTime(t: number, scrollDurationMs: number, tempo: number): number {
   return t - scrollDurationMs * tempo;
@@ -98,6 +105,8 @@ export function createTilesSimulation({
   const tails = new Uint8Array(count);
   const holdEndMs = new Float64Array(count).fill(Number.NaN);
   const noteStartMs = new Float64Array(count).fill(Number.NaN);
+  /** When a tile cleared and began to pop: a tap at its claim, a long tile when full. */
+  const clearedMs = new Float64Array(count).fill(Number.NaN);
   const score = createScore();
   let exitAlong = initialExitAlong;
 
@@ -188,6 +197,7 @@ export function createTilesSimulation({
     unbind(hold);
     tails[hold] = judgment === 'miss' ? TAIL.missed : TAIL.clear;
     holdEndMs[hold] = songMs;
+    if (judgment !== 'miss') clearedMs[hold] = songMs;
     judge('tail', judgment, tile.lane, hold, songMs);
     if (judgment === 'miss') fail({ kind: 'missedTile', lane: tile.lane, tileIndex: hold }, songMs);
   };
@@ -252,7 +262,16 @@ export function createTilesSimulation({
     }
   };
 
-  /** The tile a pointer press lands on: the next one if it can, else any other. */
+  /**
+   * Whether a tile no longer waiting is still on the stage to be pressed: one lost
+   * (drawn red) or a long tile being held, or a cleared one while it pops.
+   */
+  const stillThere = (index: number, songMs: number) => {
+    const cleared = clearedMs[index] ?? Number.NaN;
+    return Number.isNaN(cleared) || songMs - cleared < POP_MS * tempo;
+  };
+
+  /** The tile a pointer press lands on: the next one if it can, else any other still there. */
   const tileUnder = (lane: number, { ms, reachMs }: TileAim, songMs: number) => {
     const indices = laneTiles[lane] ?? [];
     let floor = laneFloor[lane] ?? 0;
@@ -271,7 +290,7 @@ export function createTilesSimulation({
       if (isNext(index)) return index;
       if (heads[index] === HEAD.pending) {
         if (pending < 0) pending = index;
-      } else if (other < 0) {
+      } else if (other < 0 && stillThere(index, songMs)) {
         other = index;
       }
     }
@@ -294,6 +313,7 @@ export function createTilesSimulation({
     heads[index] = HEAD.clear;
     noteStartMs[index] = melody === 'onBeat' ? Math.max(songMs, tile.t) : songMs;
     if (tile.dur === undefined) {
+      clearedMs[index] = songMs;
       judge('tap', 'clear', tile.lane, index, songMs);
       return;
     }
@@ -338,7 +358,7 @@ export function createTilesSimulation({
         claim(input, index, songMs);
       } else if (heads[index] !== HEAD.pending) {
         // A tile already claimed (still popping, or a long tile filling) or already
-        // lost: pressing it again is harmless.
+        // lost, still on the stage: pressing it again is harmless.
       } else if (laterTile === 'notYet') {
         onNotYet?.(lane, index);
       } else {

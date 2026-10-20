@@ -30,7 +30,7 @@ import type { StageView } from '../game/session';
 import { headDeadline } from '../game/judgment';
 import { prefersReducedMotion } from '../hud/motion';
 import { HEAD, TAIL } from '../game/simulation';
-import { exitTime } from '../game/tiles-simulation';
+import { exitTime, POP_MS } from '../game/tiles-simulation';
 import { createHighwayMaterial, EDGE_MARGIN } from './highway-material';
 import {
   exitAlong,
@@ -102,7 +102,8 @@ const MAX_RIPPLES = 16;
 const MAX_DROPLETS = 160;
 
 /** Feedback lifetimes, real seconds (never song time, so they do not scale with tempo). */
-const FLASH_S = 0.18;
+// A flash is also Tiles' pop, as long as a cleared tile can be pressed again (`POP_MS`).
+const FLASH_S = POP_MS / 1000;
 const RIPPLE_S = 0.5;
 const DROPLET_S = 0.45;
 const LANE_PULSE_S = 0.3;
