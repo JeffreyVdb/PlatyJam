@@ -374,13 +374,18 @@ describe('tiles simulation', () => {
       expect(sim.status).toBe('running');
     });
 
-    it('are lost whole in Relaxed when never claimed, once their top has left', () => {
+    it('are lost whole in Relaxed when never claimed, once their bottom edge is out', () => {
       const { sim, summary } = setup([hold(1000, 1, 500)], { failMode: 'relaxed' });
-      // One block: its top (1500) leaves the screen at 1700, and until then it is there.
-      sim.advance(1699);
+      // One block, lost as its bottom edge (1000) reaches the bottom of the screen.
+      sim.advance(1199);
       expect(summary()).toEqual([]);
-      sim.advance(1701);
+      sim.advance(1201);
       expect(summary()).toEqual(['head:miss@1#0', 'tail:miss@1#0']);
+      // Its red rides off, a harmless press until its top (1500) leaves at 1700.
+      sim.press('a', 1, 1600, at(1450));
+      expect(summary()).toHaveLength(2);
+      sim.press('b', 1, 1701, at(1600));
+      expect(summary().at(-1)).toBe('empty:miss@1#-1');
     });
 
     it('leave both fingers free: a long tile held while the next tiles are tapped', () => {
@@ -452,43 +457,53 @@ describe('tiles simulation', () => {
       expect(summary()).toEqual(['tap:clear@0#0', 'tap:clear@1#1']);
     });
 
-    it('loses a tile once its top has left the screen, a short one before a tall one', () => {
+    it('loses tiles in chart order as their bottom edges reach the bottom, tall or short', () => {
       // The first is floored to 250 ms (top 1250); the second is capped by its lane's
-      // next tile to 40 ms (top 1140), so it leaves first.
+      // next tile to 40 ms (top 1140). Their heights don't change when they are lost.
       const { sim, log } = sized([tap(1000, 0), tap(1100, 1), tap(1150, 1)], {
         failMode: 'relaxed',
       });
-      sim.advance(1339);
+      sim.advance(1199);
       expect(log).toEqual([]);
-      sim.advance(1341);
-      expect(log.map((e) => [e.tileIndex, e.judgment, e.songMs])).toEqual([[1, 'miss', 1340]]);
-      // The earlier tile is still on screen, and still next.
-      sim.press('a', 0, 1400, at(1200));
-      expect(log.map((e) => [e.tileIndex, e.judgment])).toContainEqual([0, 'clear']);
-      // The last reaches the base, 500 ms: its top leaves at 1850.
-      sim.advance(1900);
-      expect(log.map((e) => [e.tileIndex, e.judgment])).toEqual([
-        [1, 'miss'],
-        [0, 'clear'],
-        [2, 'miss'],
+      sim.advance(1201);
+      expect(log.map((e) => [e.tileIndex, e.judgment, e.songMs])).toEqual([[0, 'miss', 1200]]);
+      sim.advance(1400);
+      expect(log.map((e) => [e.tileIndex, e.judgment, e.songMs])).toEqual([
+        [0, 'miss', 1200],
+        [1, 'miss', 1300],
+        [2, 'miss', 1350],
       ]);
     });
 
-    it('ends Classic at the tile that left first', () => {
-      const { sim } = sized([tap(1000, 0), tap(1100, 1), tap(1150, 1)]);
-      sim.advance(2000);
-      expect(sim.failure).toEqual({ kind: 'missedTile', lane: 1, tileIndex: 1 });
-      expect(sim.endMs).toBeCloseTo(1340, 9);
+    it('takes a tile no more once it is lost, though most of it is still on screen', () => {
+      // Drawn from 1000 to 1500; at song ms 1250 the screen shows 1050 up.
+      const { sim, summary } = sized([tap(1000, 0), tap(3000, 1)], { failMode: 'relaxed' });
+      sim.press('a', 0, 1250, at(1400));
+      // Lost at 1200, and red from then: pressing it is harmless, not a claim.
+      expect(summary()).toEqual(['tap:miss@0#0']);
+      const early = sized([tap(1000, 0), tap(3000, 1)], { failMode: 'relaxed' });
+      early.sim.press('a', 0, 1199, at(1400));
+      expect(early.summary()).toEqual(['tap:clear@0#0']);
     });
 
-    it('takes new heights from the stage, which move where tiles end', () => {
+    it('ends Classic at the first tile lost', () => {
+      const { sim } = sized([tap(1000, 0), tap(1100, 1), tap(1150, 1)]);
+      sim.advance(2000);
+      expect(sim.failure).toEqual({ kind: 'missedTile', lane: 0, tileIndex: 0 });
+      expect(sim.endMs).toBeCloseTo(1200, 9);
+    });
+
+    it('takes new heights from the stage, which move where tiles are drawn', () => {
       const { sim, summary } = sized([tap(1000, 0), tap(3000, 1)], { failMode: 'relaxed' });
-      sim.setTileSizing({ base: 0.3, floor: 0.25, seam: 0.01 });
-      // Its top is now at 1300, lost at 1500.
-      sim.advance(1499);
-      expect(summary()).toEqual([]);
-      sim.advance(1501);
+      sim.advance(1300);
       expect(summary()).toEqual(['tap:miss@0#0']);
+      // Drawn up to 1500, its red is still under a press at 1360.
+      sim.press('a', 0, 1460, at(1360));
+      expect(summary()).toHaveLength(1);
+      // Now drawn up to 1300 only: the same press finds nothing there.
+      sim.setTileSizing({ base: 0.3, floor: 0.25, seam: 0.01 });
+      sim.press('b', 0, 1460, at(1360));
+      expect(summary()).toEqual(['tap:miss@0#0', 'empty:miss@0#-1']);
     });
 
     it('fills a long tile drawn taller than its note over the note, and clears when full', () => {

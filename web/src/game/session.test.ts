@@ -1205,13 +1205,13 @@ describe('game session', () => {
 
     it('never plays a tile nobody claimed, and fails Classic at the exit line', async () => {
       await loadTiles([tap(500, 0), tap(2500, 1)]);
-      // Lost 400 ms past the line; the screen is 1.25 windows tall, so the tile is a
-      // quarter of that tall (500 ms): its top leaves at 1400.
+      // Lost 400 ms past the line, as its bottom edge reaches the bottom of the screen
+      // (1.25 windows tall): at 900, though it is drawn 500 ms tall.
       session.setTilesFrame({ exitAlong: 0.25, widthPx: 390, heightPx: 844 });
       session.start();
-      frames(2380); // song 1380
+      frames(1880); // song 880
       expect(session.state).toBe('playing');
-      frames(400 + FINALIZE_GRACE_MS + 32);
+      frames(20 + FINALIZE_GRACE_MS + 32);
       expect(session.state).toBe('failing');
       expect(fake.piano.noteOn).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(3000);
@@ -1253,12 +1253,13 @@ describe('game session', () => {
         expect(session.view().songMs).toBeCloseTo(frozen, 6);
       });
 
-      it('slides back just far enough to show a tile that fell off whole', async () => {
+      it('slides back a short way, just far enough to show a lost tile whole', async () => {
         const frozen = await failAt([tap(500, 0), tap(2500, 1)], () => {
           for (let i = 0; i < 400 && session.state !== 'failing'; i += 1) playTo(shownMs() + 16);
         });
-        // Its top left at 1400; the Miss came a grace later.
-        expect(frozen).toBeGreaterThan(1400 + FINALIZE_GRACE_MS - 20);
+        // Lost at 900, as its bottom edge reached the bottom; the Miss came a grace later.
+        expect(frozen).toBeGreaterThan(900 + FINALIZE_GRACE_MS - 20);
+        expect(frozen).toBeLessThan(900 + FINALIZE_GRACE_MS + 40);
         expect(session.view().songMs).toBeCloseTo(frozen, 6);
         fake.advance(TILES_FAIL_SLIDE_MS / 2);
         const halfway = session.view().songMs;
@@ -1416,22 +1417,24 @@ describe('game session', () => {
         };
         const failure = () => session.view().simulation?.failure;
 
-        it('clears the next tile tapped just before it leaves the screen', async () => {
+        it('clears the next tile tapped just before its bottom edge is out', async () => {
           const tiles = [tap(500, 0), tap(3000, 1)];
           await start(tiles);
-          playTo(stage.top(tiles, 0) + stage.exitAlong * SCROLL_MS - 8);
+          playTo(500 + stage.exitAlong * SCROLL_MS - 8);
           touch('a', 0, on(500));
           expect(session.stats()).toMatchObject({ clear: 1, miss: 0 });
           expect(session.state).toBe('playing');
         });
 
-        it('loses it once it has left, and Classic fails on that tile', async () => {
+        it('loses it once its bottom edge is out, and Classic fails on that tile', async () => {
           const tiles = [tap(500, 0), tap(3000, 1)];
           await start(tiles);
-          playTo(stage.top(tiles, 0) + stage.exitAlong * SCROLL_MS + 8);
-          // The Miss still waits for the finalization grace; the tap brings it in.
+          // Most of it is still on screen, but no longer to be claimed.
+          playTo(500 + stage.exitAlong * SCROLL_MS + 8);
+          // The Miss still waits for the finalization grace; a tap on what still shows
+          // of it brings it in.
           expect(session.state).toBe('playing');
-          touch('a', 0, on(500));
+          touch('a', 0, on(600));
           expect(session.state).toBe('failing');
           expect(failure()).toEqual({ kind: 'missedTile', lane: 0, tileIndex: 0 });
           expect(session.stats()).toMatchObject({ clear: 0, miss: 1 });

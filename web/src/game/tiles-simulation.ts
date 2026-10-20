@@ -20,11 +20,12 @@ import {
  * Timing doesn't matter. Each tile is a block from its time (its bottom edge) up to
  * its top, `tileSpan` chart ms later (a long tile at least its note's length), drawn
  * exactly so on the stage. It can be claimed from the moment it appears at the top of
- * the screen until its top has left the bottom of the screen, but only in order:
- * the earliest unclaimed tile, or both tiles of an unclaimed double. A pointer press
- * claims the tile it lands on (`TileAim`); a key claims the next tile in its lane. A
- * press on no tile at all is an empty tap. Every cleared unit (tap, hold head, hold
- * tail) is judged `clear`.
+ * the screen until its bottom edge reaches the bottom of the screen (as in Magic
+ * Tiles), but only in order: the earliest unclaimed tile, or both tiles of an
+ * unclaimed double. So tiles are lost in chart order; a lost tile is drawn red until
+ * its top has left the screen. A pointer press claims the tile it lands on
+ * (`TileAim`); a key claims the next tile in its lane. A press on no tile at all is
+ * an empty tap. Every cleared unit (tap, hold head, hold tail) is judged `clear`.
  *
  * A long tile fills from its note's start (`noteStartMs`) for its `dur` and clears
  * when full, or when its top leaves the screen first; letting go before that is a
@@ -53,14 +54,17 @@ export const TILES_RULES: Readonly<TilesRules> = { laterTile: 'notYet', melody: 
  * from its claim (a long tile's from `holdDoneTime`). It then rides off translucent,
  * still drawn, so a press on it stays a harmless second press (a double-tap, a
  * bouncing finger) until its top has left the screen, like a lost tile drawn red.
+ * (A lost tile is no longer pressable from the moment its bottom edge reaches the
+ * bottom of the screen, but a press on its red remainder is just as harmless.)
  */
 export const POP_MS = 180;
 
 /**
  * A Classic failure in Tiles, as in Magic Tiles: the board freezes where it is. If
- * the tile that fell off has left the screen, the board slides back over
- * `TILES_FAIL_SLIDE_MS` (real ms) just far enough to show it whole above the bottom
- * edge. Then the offender (or the spot of an empty tap) blinks red
+ * the offender is a tile never claimed, lost as its bottom edge reached the bottom of
+ * the screen, the board slides back over `TILES_FAIL_SLIDE_MS` (real ms) just far
+ * enough to show it whole above the bottom edge (the finalization grace it went on
+ * scrolling for). A long tile let go too soon is still on screen: it stays put. Then the offender (or the spot of an empty tap) blinks red
  * `TILES_FAIL_BLINKS` times, `TILES_FAIL_BLINK_MS` each, and the results follow
  * `TILES_FAIL_RESULTS_MS` after the failure.
  */
@@ -76,25 +80,28 @@ export function appearTime(t: number, scrollDurationMs: number, tempo: number): 
 }
 
 /**
- * Chart ms at which a tile whose top is at chart ms `top` (its time plus its span)
- * has left the screen: the top has crossed the exit line, `exitAlong` scroll windows
- * past the line. A function of the scroll duration in force, so a speed that changes
- * during a song only has to change what it is given.
+ * Chart ms at which chart ms `ms` along the lane reaches the bottom edge of the
+ * screen (the exit line, `exitAlong` scroll windows past the line): a tile's time
+ * for when it is lost, its top (its time plus its span) for when it has left. A
+ * function of the scroll duration in force, so a speed that changes during a song
+ * only has to change what it is given.
  */
 export function exitTime(
-  top: number,
+  ms: number,
   exitAlong: number,
   scrollDurationMs: number,
   tempo: number,
 ): number {
-  return top + exitAlong * scrollDurationMs * tempo;
+  return ms + exitAlong * scrollDurationMs * tempo;
 }
 
 /**
  * Chart ms at which a claimed long tile, `span` chart ms tall, clears: full (`dur`
  * after its note's start), or when its top has left the screen, whichever comes
  * first. The stage shows it clear and popping from then, though the judgment arrives
- * after the session's finalization grace.
+ * after the session's finalization grace. Unlike a tile never claimed (lost as its
+ * bottom edge reaches the bottom of the screen), a claimed one is held for as long as
+ * any of it is drawn.
  */
 export function holdDoneTime(
   tile: Tile,
@@ -161,11 +168,7 @@ export function createTilesSimulation({
   const laneCursor = new Array<number>(LANES).fill(0);
   /** Per lane: no tile before it can be pressed again (its top has left the screen). */
   const laneFloor = new Array<number>(LANES).fill(0);
-  /**
-   * The earliest unclaimed head: the next to claim. Heads are not lost in chart order
-   * (a tile is lost when its top leaves, and spans differ), but none is lost before
-   * its time plus the exit distance, so the next loss is found near this cursor.
-   */
+  /** The earliest unclaimed head: the next to claim, and the next to be lost. */
   let expiryCursor = 0;
   /** Holds currently `holding`, in no particular order. */
   const active: number[] = [];
@@ -196,8 +199,10 @@ export function createTilesSimulation({
 
   /** Chart ms of a tile's top. */
   const topOf = (index: number) => tileAt(index).t + (spans[index] ?? 0);
-  /** When a tile has left the screen: its top past the exit line. */
-  const exitOf = (index: number) => exitTime(topOf(index), exitAlong, scrollDurationMs, tempo);
+  /** When an unclaimed tile is lost: its bottom edge at the bottom of the screen. */
+  const lostAt = (index: number) => exitTime(tileAt(index).t, exitAlong, scrollDurationMs, tempo);
+  /** When a tile has left the screen: its top past the bottom edge. */
+  const goneAt = (index: number) => exitTime(topOf(index), exitAlong, scrollDurationMs, tempo);
   /** When a claimed hold clears: full, or its top off the screen, whichever comes first. */
   const holdDoneAt = (hold: number) => {
     const tile = tileAt(hold);
@@ -253,7 +258,7 @@ export function createTilesSimulation({
 
   const expireHead = (index: number) => {
     const tile = tileAt(index);
-    const lost = exitOf(index);
+    const lost = lostAt(index);
     heads[index] = HEAD.missed;
     const isHold = tile.dur !== undefined;
     judge(isHold ? 'head' : 'tap', 'miss', tile.lane, index, lost);
@@ -277,35 +282,14 @@ export function createTilesSimulation({
   };
 
   /**
-   * The unclaimed head lost first, and when (`Infinity` for none): the earliest exit
-   * among pending heads, scanning from the next to claim while a head could still be
-   * lost before the best found so far and before `limit`.
-   */
-  const firstLoss = (limit: number): [number, number] => {
-    let head = -1;
-    let lost = Infinity;
-    const exitMs = exitTime(0, exitAlong, scrollDurationMs, tempo);
-    for (let index = nextPendingHead(); index >= 0 && index < count; index += 1) {
-      const soonest = tileAt(index).t + exitMs;
-      if (soonest >= lost || soonest >= limit) break;
-      if (heads[index] !== HEAD.pending) continue;
-      const at = exitOf(index);
-      if (at < lost) {
-        lost = at;
-        head = index;
-      }
-    }
-    return [head, lost];
-  };
-
-  /**
    * Finalizes, in time order, heads lost before `limit` (a head can still be claimed
    * at its exit time) and hold completions at or before `limit`. Returns whether the
    * run is still going.
    */
   const finalize = (limit: number): boolean => {
     while (status === 'running') {
-      const [head, lost] = firstLoss(limit);
+      const head = nextPendingHead();
+      const lost = head < 0 ? Infinity : lostAt(head);
       let hold = -1;
       let done = Infinity;
       for (const index of active) {
@@ -335,13 +319,14 @@ export function createTilesSimulation({
   /**
    * The tile a pointer press lands on: the next one if it can, else any other drawn
    * there. A tile no longer waiting stays drawn until its top leaves the screen:
-   * cleared (riding off translucent), held, or lost (red).
+   * cleared (riding off translucent), held, or lost (red, from when its bottom edge
+   * reached the bottom of the screen; `finalize` has already marked it).
    */
   const tileUnder = (lane: number, { ms, reachMs }: TileAim, songMs: number) => {
     const indices = laneTiles[lane] ?? [];
     let floor = laneFloor[lane] ?? 0;
     // A tile whose top has left the screen stays gone: start the search after it.
-    while (floor < indices.length && exitOf(indices[floor] ?? 0) < songMs) {
+    while (floor < indices.length && goneAt(indices[floor] ?? 0) < songMs) {
       floor += 1;
     }
     laneFloor[lane] = floor;

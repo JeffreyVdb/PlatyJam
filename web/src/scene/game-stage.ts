@@ -990,7 +990,8 @@ export function createGameStage({
    * Tiles' flat view. Each tile is a block from its bottom edge (its time) to its top
    * (`tileSpan` later), full lane width but for a gutter at the dividers: ink while
    * it waits (tinted when it is next), a lily pop when claimed that then rides off
-   * translucent, red when it fell off. A long tile held fills with lily from the
+   * translucent, red from when it is lost (its bottom edge at the bottom of the
+   * screen) until it has left. A long tile held fills with lily from the
    * bottom, with a rounded top and a ring under it; once full it pops like a tap.
    * Draw calls: the blocks, the fills' caps (and a waiting long tile's dot), and the
    * claimed tiles; the shared ripples and droplets come in `layoutEffects`.
@@ -1069,11 +1070,12 @@ export function createGameStage({
       const bottom = z(tile.t);
       const head = simulation?.heads[i] ?? HEAD.pending;
       const tail = simulation?.tails[i] ?? TAIL.none;
-      // Its top has left the screen: the Miss is only waiting for in-flight input.
+      // Its bottom edge has reached the bottom of the screen: it is lost, red from now
+      // on, and its Miss is only waiting for in-flight input.
       const lapsed =
-        head === HEAD.pending && songMs > exitTime(tile.t + span, exit, scrollDurationMs, tempo);
+        head === HEAD.pending && songMs > exitTime(tile.t, exit, scrollDurationMs, tempo);
       if (head === HEAD.pending && !lapsed && Number.isNaN(nextT)) nextT = tile.t;
-      // Below the bottom edge, unless it is the failure the board shows.
+      // All of it below the bottom edge, unless it is the failure the board shows.
       if (top > near && i !== offender) continue;
       const isNext = tile.t === nextT && head === HEAD.pending && !lapsed;
 

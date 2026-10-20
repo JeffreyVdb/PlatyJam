@@ -830,8 +830,9 @@ export function createGameplaySession({
 
   /**
    * Tiles' Classic failure: the board freezes where the stage showed it. A tile that
-   * fell off the screen is brought back, sliding just far enough to show it whole
-   * above the bottom edge (its bottom on it); anything else stays put.
+   * fell off, lost as its bottom edge reached the bottom of the screen and shown a
+   * finalization grace past that, is brought back: the board slides just far enough
+   * to show it whole (its bottom on the bottom edge). Anything else stays put.
    */
   const tilesFailSongMs = (cfg: SessionConfig) => {
     const failure = sim?.failure;

@@ -138,8 +138,9 @@ function spanOf(
 
 /**
  * How tall tile `index` is drawn, in chart ms from its bottom edge (at its time) to
- * its top. The drawing, the hit test and the exit line all use it, so a tile is
- * pressable exactly where it is drawn and lost once its top has left the screen.
+ * its top. The drawing and the hit test both use it, so a tile is pressable exactly
+ * where it is drawn, and drawn (red once lost, translucent once cleared) until its
+ * top has left the screen.
  */
 export function tileSpan(
   tiles: readonly Tile[],

@@ -305,7 +305,7 @@ describe('the Tiles stage', () => {
     expect(h.instances('flat-claimed')).toHaveLength(1);
   });
 
-  it('keeps a tile past the line claimable until its top leaves the screen (Relaxed)', () => {
+  it('keeps a tile claimable until its bottom edge is out, then rides it off red (Relaxed)', () => {
     const tiles = [tap(1000, 1), tap(5000, 0)];
     const h = setup(tiles);
     h.step(1150);
@@ -313,13 +313,28 @@ describe('the Tiles stage', () => {
     // Its bottom edge is past the line; it is still ink.
     expect(tile?.bottom).toBeGreaterThan(0);
     expect(tile?.colour.r).toBeLessThan(0.3);
-    const span = tileSpans(tiles, SCROLL_MS, h.sizing)[0] ?? 0;
-    const lostAt = 1000 + span + (h.flat.near / h.flat.far) * SCROLL_MS;
+    const exitMs = (h.flat.near / h.flat.far) * SCROLL_MS;
+    const lostAt = 1000 + exitMs;
     h.step(lostAt - 1150 - 20);
     expect(h.sim.heads[0]).toBe(HEAD.pending);
-    expect(h.screenY(h.blocks()[0]?.top ?? NaN)).toBeLessThan(HEIGHT);
-    h.step(40);
+    expect(isSnag(h.blocks()[0]?.colour ?? new Color())).toBe(false);
+    // Its bottom edge past the bottom of the screen: red at once, before its Miss is
+    // finalized, and a press on what still shows of it no longer claims it.
+    h.show(lostAt + 10);
+    expect(h.sim.heads[0]).toBe(HEAD.pending);
+    const [red] = h.blocks();
+    expect(isSnag(red?.colour ?? new Color())).toBe(true);
+    expect(h.screenY(red?.bottom ?? NaN)).toBeGreaterThan(HEIGHT);
+    expect(h.screenY(red?.top ?? NaN)).toBeLessThan(HEIGHT - 50);
+    h.touch('a', 1, 1000 + 100);
     expect(h.sim.heads[0]).toBe(HEAD.missed);
+    // It rides off red until its top has left.
+    const span = tileSpans(tiles, SCROLL_MS, h.sizing)[0] ?? 0;
+    h.step(span - 30);
+    expect(h.blocks()).toHaveLength(1);
+    expect(isSnag(h.blocks()[0]?.colour ?? new Color())).toBe(true);
+    h.step(40);
+    expect(h.blocks()).toHaveLength(0);
     expect(h.object('lane-glows').visible).toBe(false);
   });
 
