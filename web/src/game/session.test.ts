@@ -1280,13 +1280,23 @@ describe('game session', () => {
         expect(session.view().songMs).toBeCloseTo(900, 6);
       });
 
-      it('keeps a long tile let go on screen where it is', async () => {
+      // Drawn 800 ms tall, it is held until full at 1300, its top leaving at 1700: let
+      // go before its bottom edge is out (700) or after (1100), it is on screen.
+      it.each([700, 1100])('keeps a long tile let go on screen where it is (at %s)', async (ms) => {
         const frozen = await failAt([hold(500, 2, 800), tap(3000, 1)], () => {
           playTo(-200);
           touch('a', 2, on(500));
-          playTo(700);
+          playTo(ms);
           release('a');
         });
+        expect(session.view().simulation?.failure).toEqual({
+          kind: 'missedTile',
+          lane: 2,
+          tileIndex: 0,
+        });
+        expect(frozen).toBeCloseTo(ms, 6);
+        fake.advance(TILES_FAIL_SLIDE_MS / 2);
+        expect(session.view().songMs).toBeCloseTo(frozen, 6);
         fake.advance(TILES_FAIL_SLIDE_MS * 2);
         expect(session.view().songMs).toBeCloseTo(frozen, 6);
       });

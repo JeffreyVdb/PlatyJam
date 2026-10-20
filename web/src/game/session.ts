@@ -29,6 +29,7 @@ import type {
 import {
   createSimulation,
   finalizationHorizon,
+  HEAD,
   type Simulation,
   type SimulationOptions,
   TAIL,
@@ -829,14 +830,16 @@ export function createGameplaySession({
   }
 
   /**
-   * Tiles' Classic failure: the board freezes where the stage showed it. A tile that
-   * fell off, lost as its bottom edge reached the bottom of the screen and shown a
+   * Tiles' Classic failure: the board freezes where the stage showed it. A tile never
+   * claimed, lost as its bottom edge reached the bottom of the screen and shown a
    * finalization grace past that, is brought back: the board slides just far enough
-   * to show it whole (its bottom on the bottom edge). Anything else stays put.
+   * to show it whole (its bottom on the bottom edge). Anything else stays put, a long
+   * tile let go too soon included: it is still on screen.
    */
   const tilesFailSongMs = (cfg: SessionConfig) => {
     const failure = sim?.failure;
-    const tile = failure?.kind === 'missedTile' ? tiles()[failure.tileIndex] : undefined;
+    const lost = failure?.kind === 'missedTile' && sim?.heads[failure.tileIndex] === HEAD.missed;
+    const tile = lost ? tiles()[failure.tileIndex] : undefined;
     const whole = tile ? tile.t + frame.exitAlong * cfg.scrollDurationMs * cfg.tempo : failedSongMs;
     const target = Math.min(failedSongMs, whole);
     if (reducedMotion()) return target;
