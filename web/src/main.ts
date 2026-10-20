@@ -245,12 +245,12 @@ function main() {
   const safeArea = createSafeAreaProbe(hudRoot);
   lifecycle.on('resize', ({ width, height }) => {
     scene.resize(width, height, safeArea.read());
-    // The HUD lays itself out for the stage's layout (portrait or landscape) and places
-    // the combo and judgment relative to the hit line.
+    // The HUD lays itself out for Rhythm's layout (portrait or landscape) and places
+    // the combo and judgment relative to its hit line; Tiles' HUD keys on the game.
     hudRoot.dataset.layout = scene.layout;
     hudRoot.style.setProperty('--hit-line-y', `${(scene.hitLineY() * 100).toFixed(2)}%`);
-    // Tiles loses a tile where this layout's exit line is.
-    session?.setExitAlong(scene.exitAlong());
+    // Tiles loses a tile at the bottom of the screen, and sizes tiles by its height.
+    session?.setTilesFrame(scene.tilesFrame());
   });
   // Every GPU resource died with the old context; rebuild before the loop restarts.
   lifecycle.on('contextrestored', () => {

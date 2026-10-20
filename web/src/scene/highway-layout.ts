@@ -1,11 +1,25 @@
-import { PerspectiveCamera, Plane, Raycaster, Vector2, Vector3 } from 'three';
+import {
+  type OrthographicCamera,
+  PerspectiveCamera,
+  Plane,
+  Raycaster,
+  Vector2,
+  Vector3,
+} from 'three';
 import { LANES } from '../chart/schema';
 import type { LaneSpot } from '../game/input';
 import { fitCamera, type CameraFit } from './camera-fit';
-import { laneForPoint, type HighwayBounds } from './lane-layout';
+import {
+  FLAT_LINE_LANDSCAPE,
+  FLAT_LINE_PORTRAIT,
+  laneForPoint,
+  type HighwayBounds,
+  type TilesFrame,
+} from './lane-layout';
 
 /**
- * How the four lanes are laid out for the way the iPad is held.
+ * How Rhythm's four lanes are laid out for the way the iPad is held. (Tiles draws
+ * its own flat view in both orientations: `FlatLayout` below.)
  *
  * - `handheld` (portrait): the iPad is held and played with both thumbs. A long
  *   highway in perspective, as narrow as the screen is, lanes and notes as big as
@@ -62,12 +76,6 @@ export interface HighwayLayout {
   direction: Vector3;
   /** Where a touch counts, beyond the drawn lanes: `halfWidth` and `slack` are lane units. */
   touch: HighwayBounds;
-  /**
-   * Tiles: how far beyond a tile's drawn head and body, along the lane, a press still
-   * lands on it (world units). Across the lane the whole lane counts: the gap between
-   * two tiles is smaller than a fingertip. Tune it on the iPad.
-   */
-  tileSlack: number;
 }
 
 export const HANDHELD: HighwayLayout = {
@@ -83,8 +91,6 @@ export const HANDHELD: HighwayLayout = {
   target: new Vector3(0, 0, -3.2),
   direction: new Vector3(0, 0.62, 0.78).normalize(),
   touch: { halfWidth: HIGHWAY_WIDTH / 2, slack: 0.15, far: 14, near: 1.6 + 1.2 },
-  // Most of a head again: far up the lane a tile is only a few px tall.
-  tileSlack: 0.35,
 };
 
 /** Elevation of the tabletop camera above the table, degrees. */
@@ -104,12 +110,16 @@ export const TABLETOP: HighwayLayout = {
   target: new Vector3(0, 0, -0.7),
   direction: new Vector3(0, Math.sin(TABLETOP_ELEVATION), Math.cos(TABLETOP_ELEVATION)),
   touch: { halfWidth: HIGHWAY_WIDTH / 2, slack: 0.1, far: 2.1, near: 2.4 },
-  tileSlack: 0.1,
 };
+
+/** Whether a viewport is landscape: by its shape, never by orientation events. */
+export function isLandscape(width: number, height: number): boolean {
+  return width / Math.max(1, height) >= TABLETOP_MIN_ASPECT;
+}
 
 /** The layout for a measured viewport. Decided by its shape, never by orientation events. */
 export function selectLayout(width: number, height: number): HighwayLayout {
-  return width / Math.max(1, height) >= TABLETOP_MIN_ASPECT ? TABLETOP : HANDHELD;
+  return isLandscape(width, height) ? TABLETOP : HANDHELD;
 }
 
 /** How far below the hit line the tabletop camera keeps the lanes' outer edges on screen. */
@@ -186,51 +196,103 @@ export function laneAtNdc(
   return laneForPoint(hit.x, hit.z, layout.touch);
 }
 
+// ---- Tiles: the flat view (PLA-18) ----
+
 /**
- * The Tiles hit test: the lane and the place along it under a point of the screen
- * (NDC), or undefined off the lanes. The pointer is cast into the lanes' plane, not
- * at the tile meshes; the simulation finds the tile from the time. The touch area
- * reaches beyond the far end by `reach`, since a tile appears there.
+ * Tiles' view in both orientations, as in Magic Tiles: the four lanes are the whole
+ * screen, seen flat from straight above, edge to edge and top to bottom (under the
+ * safe areas too; nothing is kept clear for the HUD, which tiles pass under). World
+ * units are lane widths, as in Rhythm's layouts, so the screen is `4 × height / width`
+ * of them tall.
+ *
+ * A tile's time is its bottom edge. It reaches the notional line, `line` of the way
+ * down, at that time, and the top of the screen a scroll window before: `far` units
+ * from the line are one window, so Tile speed keeps its lead time. Below the line the
+ * lanes run `near` units to the bottom edge, which is the exit line. All of it is
+ * arithmetic on the viewport, computed again on every resize.
  */
-export function spotAtNdc(
-  camera: PerspectiveCamera,
-  x: number,
-  y: number,
-  layout: HighwayLayout,
-): LaneSpot | undefined {
-  raycaster.setFromCamera(pointer.set(x, y), camera);
-  if (!raycaster.ray.intersectPlane(ground, hit)) return undefined;
-  const reach = layout.tileDepth / 2 + layout.tileSlack;
-  const { touch } = layout;
-  if (hit.z < -touch.far - reach) return undefined;
-  const lane = laneForPoint(hit.x, Math.max(hit.z, -touch.far), touch);
-  if (lane === undefined) return undefined;
-  return { lane, along: hit.z / layout.far, reach: reach / layout.far };
+export interface FlatLayout {
+  kind: 'flat';
+  /** The viewport, CSS px. */
+  width: number;
+  height: number;
+  /** World units per CSS px (the same both ways: nothing is foreshortened). */
+  unit: number;
+  /** The line, as a fraction of the height from the top. */
+  line: number;
+  /** From the top of the screen to the line, world units: one scroll window. */
+  far: number;
+  /** From the line to the bottom edge, world units. */
+  near: number;
+}
+
+/** Every layout the stage draws: Rhythm's highways and Tiles' flat view. */
+export type StageLayoutKind = LayoutKind | 'flat';
+
+/**
+ * Tiles' along-lane slack: how far beyond a tile's drawn top or bottom edge a press
+ * still lands on it, CSS px. Generous: a fingertip lands a little off where it aims,
+ * and a tile pressed just outside its edge should still count. Across the lane the
+ * whole lane counts.
+ */
+export const FLAT_SLACK_PX = 28;
+
+/** The flat view of a viewport, CSS px. */
+export function flatLayout(width: number, height: number): FlatLayout {
+  const w = Math.max(1, width);
+  const h = Math.max(1, height);
+  const line = isLandscape(w, h) ? FLAT_LINE_LANDSCAPE : FLAT_LINE_PORTRAIT;
+  const unit = HIGHWAY_WIDTH / w;
+  const length = h * unit;
+  return {
+    kind: 'flat',
+    width: w,
+    height: h,
+    unit,
+    line,
+    far: length * line,
+    near: length * (1 - line),
+  };
+}
+
+/** How high above the lanes the flat camera sits, and the depth it sees. */
+const FLAT_EYE = 10;
+
+/** Points an orthographic camera straight down at the lanes, framing exactly the viewport. */
+export function frameFlat(camera: OrthographicCamera, flat: FlatLayout): void {
+  const half = (flat.far + flat.near) / 2;
+  const centre = (flat.near - flat.far) / 2;
+  camera.left = -HIGHWAY_WIDTH / 2;
+  camera.right = HIGHWAY_WIDTH / 2;
+  camera.top = half;
+  camera.bottom = -half;
+  camera.near = 0.1;
+  camera.far = FLAT_EYE * 2;
+  // Up on screen is up the lane (negative z): looking straight down needs a new up.
+  camera.up.set(0, 0, -1);
+  camera.position.set(0, FLAT_EYE, centre);
+  camera.lookAt(0, 0, centre);
+  camera.updateProjectionMatrix();
+  camera.updateMatrixWorld();
 }
 
 /**
- * Tiles' exit line: world z past the hit line where a tile falls off. Handheld: the
- * near end of the highway. Tabletop: the lanes already run off the bottom of the
- * screen, so the bottom of the screen inside the safe area (it depends on the
- * viewport, so call it after `frameLayout`).
+ * The Tiles hit test in the flat view: the lane under a point of the screen (CSS px
+ * from the surface's top left) by which quarter of the width it is in, and the place
+ * along it by its height, in scroll windows from the line. The whole screen is lanes.
+ * The simulation finds the tile from the time; `reach` is the slack only, since a
+ * tile's drawn extent comes with it (`tileSpan`).
  */
-export function exitDepth(
-  camera: PerspectiveCamera,
-  layout: HighwayLayout,
-  height: number,
-  insets: Readonly<Insets> = NO_INSETS,
-): number {
-  if (layout.kind === 'handheld') return layout.near;
-  const bottom = -1 + (2 * insets.bottom) / Math.max(1, height);
-  raycaster.setFromCamera(pointer.set(0, bottom), camera);
-  if (!raycaster.ray.intersectPlane(ground, hit)) return layout.near;
-  return Math.min(layout.near, hit.z);
+export function flatSpotAt(x: number, y: number, flat: FlatLayout): LaneSpot {
+  const lane = Math.min(LANES - 1, Math.max(0, Math.floor((x / flat.width) * LANES)));
+  const z = -flat.far + Math.min(flat.height, Math.max(0, y)) * flat.unit;
+  return { lane, along: z / flat.far, reach: (FLAT_SLACK_PX * flat.unit) / flat.far };
 }
 
 /**
- * The exit line in scroll windows past the hit line, for the simulation: a head is
- * lost once all of it has crossed the line at `exitZ`.
+ * What the simulation needs of the flat view: the exit line (the bottom edge of the
+ * screen) in scroll windows past the line, and the screen's size.
  */
-export function exitAlong(layout: HighwayLayout, exitZ: number): number {
-  return (exitZ + layout.tileDepth / 2) / layout.far;
+export function flatFrame(flat: FlatLayout): TilesFrame {
+  return { exitAlong: flat.near / flat.far, widthPx: flat.width, heightPx: flat.height };
 }

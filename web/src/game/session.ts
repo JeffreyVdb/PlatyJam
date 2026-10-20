@@ -7,6 +7,8 @@ import type { PianoVoice, Sampler } from '../audio/sampler';
 import { type Accompaniment, PAUSE_FADE_MS } from '../audio/scheduler';
 import type { EffectsPlayer, FillVoice } from '../audio/sfx';
 import type { Chart, DifficultyName, Tile } from '../chart/schema';
+import { DEFAULT_TILES_FRAME, type TilesFrame, tileSizing, tileSpan } from '../scene/lane-layout';
+import { prefersReducedMotion } from '../hud/motion';
 import { effectCues, GAME_EFFECTS } from './effect-cues';
 import type { LaneInputSink, LaneSpot } from './input';
 import { accuracyOf, earnsPerfectBadge, starsFor } from './scoring';
@@ -32,7 +34,12 @@ import {
   TAIL,
   type TileAim,
 } from './simulation';
-import { createTilesSimulation, DEFAULT_EXIT_ALONG, holdDoneTime } from './tiles-simulation';
+import {
+  createTilesSimulation,
+  holdDoneTime,
+  TILES_FAIL_RESULTS_MS,
+  TILES_FAIL_SLIDE_MS,
+} from './tiles-simulation';
 
 // Tunable presentation and audio timings.
 
@@ -49,10 +56,13 @@ export const FAIL_FADE_MS = 120;
 export const QUIT_FADE_MS = 150;
 /** Fade for anything still ringing when a song completes. */
 export const END_FADE_MS = 800;
-/** The visual rewind after a failure: how far back (real ms of song) and how long it takes. */
+/**
+ * Rhythm's visual rewind after a failure: how far back (real ms of song) and how long
+ * it takes. Tiles freezes instead (`TILES_FAIL_SLIDE_MS` in tiles-simulation.ts).
+ */
 export const REWIND_SONG_MS = 450;
 export const REWIND_DURATION_MS = 650;
-/** From the failure to handing over the results. */
+/** From a Rhythm failure to handing over the results (Tiles: `TILES_FAIL_RESULTS_MS`). */
 export const FAIL_RESULTS_DELAY_MS = 1600;
 
 /** The parts of `GameAudio` a session uses. */
@@ -80,6 +90,8 @@ export interface GameplaySessionOptions {
   bus: Lifecycle;
   /** `performance.now()`. */
   now?: () => number;
+  /** Whether the player asked for less motion: Tiles' failure then jumps, not slides. */
+  reducedMotion?: () => boolean;
 }
 
 /** What the stage draws this frame. */
@@ -103,11 +115,10 @@ export interface GameplaySession extends GameSession {
   /** The input layer, so pausing can forget held fingers and keys. */
   attachInput(input: { clear(): void }): void;
   /**
-   * Tiles: where the stage's layout loses a tile, in scroll windows past the hit line
-   * (`exitAlong` in scene/highway-layout.ts). Call it whenever the stage is resized:
-   * the layout, and on the tabletop the screen's bottom edge, decide it.
+   * Tiles: the screen the stage draws on (`GameStage.tilesFrame`): where a tile is
+   * lost, and how tall tiles are. Call it whenever the stage is resized.
    */
-  setExitAlong(along: number): void;
+  setTilesFrame(frame: Readonly<TilesFrame>): void;
   /** Call every render frame: finalizes misses and completions, runs transitions. */
   update(): void;
   /** Call after `update()` to get what to draw. */
@@ -131,6 +142,7 @@ export function createGameplaySession({
   audio,
   bus,
   now = () => performance.now(),
+  reducedMotion = () => prefersReducedMotion(),
 }: GameplaySessionOptions): GameplaySession {
   const { engine, piano, accompaniment, backing, effects, samples } = audio;
   const events = createEventBus<SessionEvents>();
@@ -160,7 +172,7 @@ export function createGameplaySession({
    * keeps the tile (`undefined`); resuming picks it up again if the tile is held.
    */
   const fills = new Map<number, FillVoice | undefined>();
-  let exitAlong = DEFAULT_EXIT_ALONG;
+  let frame: Readonly<TilesFrame> = DEFAULT_TILES_FRAME;
   /** The furthest progress this run has reached; a failure never takes it back. */
   let furthest = 0;
   /** When the run failed (performance ms) and the song time shown then, for the rewind. */
@@ -193,6 +205,8 @@ export function createGameplaySession({
   };
 
   const tiles = () => (config ? config.chart.difficulties[config.difficulty].tiles : []);
+  /** Tiles: how tall tiles are drawn on the stage's screen, at the run's tile size. */
+  const sizing = (cfg: SessionConfig) => tileSizing(cfg.tileSize, frame);
 
   /** Plays a hit tile's note: now, or at context time `at`. */
   const strike = (index: number, tile: Tile, at?: number) => {
@@ -263,7 +277,8 @@ export function createGameplaySession({
     const startMs = sim?.noteStartMs[index];
     if (!config || tile?.dur === undefined || startMs === undefined) return;
     const { scrollDurationMs, tempo } = config;
-    const doneMs = holdDoneTime(tile, startMs, exitAlong, scrollDurationMs, tempo);
+    const span = tileSpan(tiles(), index, scrollDurationMs * tempo, sizing(config));
+    const doneMs = holdDoneTime(tile, span, startMs, frame.exitAlong, scrollDurationMs, tempo);
     const seconds = (songSpan: number) => songSpan / tempo / 1000;
     const durationS = seconds(doneMs - startMs);
     fills.set(
@@ -292,7 +307,8 @@ export function createGameplaySession({
     return createTilesSimulation({
       ...options,
       scrollDurationMs: config.scrollDurationMs,
-      exitAlong,
+      exitAlong: frame.exitAlong,
+      sizing: sizing(config),
       onNotYet: (lane, tileIndex) => {
         events.emit('notyet', { lane, tileIndex });
       },
@@ -367,11 +383,14 @@ export function createGameplaySession({
       failedSongMs = shownSongMs;
       const final = buildResults(sim, config);
       setState('failing');
-      timer = setTimeout(() => {
-        timer = undefined;
-        results = final;
-        setState('finished');
-      }, FAIL_RESULTS_DELAY_MS);
+      timer = setTimeout(
+        () => {
+          timer = undefined;
+          results = final;
+          setState('finished');
+        },
+        config.mode === 'tiles' ? TILES_FAIL_RESULTS_MS : FAIL_RESULTS_DELAY_MS,
+      );
     } else if (sim.status === 'complete') {
       engine.clock.pause();
       silence(END_FADE_MS);
@@ -785,9 +804,10 @@ export function createGameplaySession({
     attachInput(next) {
       input = next;
     },
-    setExitAlong(along) {
-      exitAlong = along;
-      sim?.setExitAlong(along);
+    setTilesFrame(next) {
+      frame = { ...next };
+      sim?.setExitAlong(frame.exitAlong);
+      if (config) sim?.setTileSizing(sizing(config));
     },
 
     update() {
@@ -808,6 +828,21 @@ export function createGameplaySession({
     return state === 'leadIn' || state === 'playing' || state === 'paused' || state === 'countdown';
   }
 
+  /**
+   * Tiles' Classic failure: the board freezes where the stage showed it. A tile that
+   * fell off the screen is brought back, sliding just far enough to show it whole
+   * above the bottom edge (its bottom on it); anything else stays put.
+   */
+  const tilesFailSongMs = (cfg: SessionConfig) => {
+    const failure = sim?.failure;
+    const tile = failure?.kind === 'missedTile' ? tiles()[failure.tileIndex] : undefined;
+    const whole = tile ? tile.t + frame.exitAlong * cfg.scrollDurationMs * cfg.tempo : failedSongMs;
+    const target = Math.min(failedSongMs, whole);
+    if (reducedMotion()) return target;
+    const eased = easeOut((now() - failedAt) / TILES_FAIL_SLIDE_MS);
+    return failedSongMs + (target - failedSongMs) * eased;
+  };
+
   const displaySongMs = () => {
     if (!config) return 0;
     switch (state) {
@@ -821,6 +856,7 @@ export function createGameplaySession({
       case 'finished': {
         const end = sim?.endMs ?? engine.clock.position();
         if (sim?.status !== 'failed') return end;
+        if (config.mode === 'tiles') return tilesFailSongMs(config);
         // From what the stage showed back to a little before the failure.
         const target = end - REWIND_SONG_MS * config.tempo;
         const eased = easeOut((now() - failedAt) / REWIND_DURATION_MS);

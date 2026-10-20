@@ -193,6 +193,10 @@ describe('setupKey', () => {
     expect(setupKey({ ...selection, tempo: 1.5 }, settings, 'rhythm')).not.toBe(key);
     expect(setupKey(selection, { ...settings, failMode: 'relaxed' }, 'rhythm')).not.toBe(key);
     expect(setupKey(selection, { ...settings, scrollDurationMs: 900 }, 'rhythm')).not.toBe(key);
+    expect(setupKey(selection, { ...settings, tileSize: 'big' }, 'tiles')).not.toBe(
+      setupKey(selection, settings, 'tiles'),
+    );
+    expect(setupKey(selection, { ...settings, tileSize: 'big' }, 'rhythm')).toBe(key);
     expect(setupKey(selection, settings, 'tiles')).not.toBe(key);
   });
 

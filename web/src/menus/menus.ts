@@ -129,7 +129,7 @@ export function createMenus({
     if (!force && key === loadedKey) return;
     loadedKey = key;
     startFailed = false;
-    const { failMode, scrollDurationMs } = store.settings;
+    const { failMode, scrollDurationMs, tileSize } = store.settings;
     session.load({
       chart: charts.get(selection.songId),
       mode,
@@ -137,6 +137,7 @@ export function createMenus({
       tempo: selection.tempo,
       failMode,
       scrollDurationMs,
+      tileSize,
     });
   };
 

@@ -1,5 +1,6 @@
 import {
   AdditiveBlending,
+  CircleGeometry,
   Color,
   DataTexture,
   DynamicDrawUsage,
@@ -9,6 +10,7 @@ import {
   Mesh,
   MeshBasicMaterial,
   Object3D,
+  OrthographicCamera,
   PerspectiveCamera,
   PlaneGeometry,
   RGBAFormat,
@@ -17,8 +19,10 @@ import {
   ShaderMaterial,
   Shape,
   ShapeGeometry,
+  Vector2,
   Vector3,
   type BufferGeometry,
+  type Camera,
   type Material,
   type Texture,
   type WebGLRenderer,
@@ -30,11 +34,21 @@ import type { StageView } from '../game/session';
 import { headDeadline } from '../game/judgment';
 import { prefersReducedMotion } from '../hud/motion';
 import { HEAD, type Simulation, TAIL } from '../game/simulation';
-import { exitTime, holdDoneTime, POP_MS } from '../game/tiles-simulation';
+import {
+  exitTime,
+  holdDoneTime,
+  POP_MS,
+  TILES_FAIL_BLINK_MS,
+  TILES_FAIL_BLINKS,
+  TILES_FAIL_SLIDE_MS,
+} from '../game/tiles-simulation';
 import { createHighwayMaterial, EDGE_MARGIN } from './highway-material';
 import {
-  exitAlong,
-  exitDepth,
+  type FlatLayout,
+  flatFrame,
+  flatLayout,
+  flatSpotAt,
+  frameFlat,
   frameLayout,
   HANDHELD,
   HIGHWAY_WIDTH,
@@ -45,9 +59,17 @@ import {
   type LayoutKind,
   NO_INSETS,
   selectLayout,
-  spotAtNdc,
+  type StageLayoutKind,
 } from './highway-layout';
-import { firstVisibleTile, longestHold, tileDepth } from './lane-layout';
+import {
+  firstVisibleTile,
+  longestHold,
+  type TilesFrame,
+  tileDepth,
+  tileSizing,
+  type TileSizing,
+  tileSpans,
+} from './lane-layout';
 
 /**
  * The gameplay stage: four lanes on the billabong, tiles scrolling to the hit line
@@ -62,11 +84,19 @@ import { firstVisibleTile, longestHold, tileDepth } from './lane-layout';
  * shape calls for the other layout (`highway-layout.ts`): geometry, camera, fog and
  * touch area are all read from the active layout when they are used.
  *
- * Tiles (the game is read from the view each frame) draws the same lanes with dark
- * ink tiles that ride on past the hit line, and keeps its accent, the water lily, for
- * what happens: the next tile's tint, the pop of a claimed tile, a long tile filling
- * up and the faint exit line where tiles fall off. The hit line itself, a promise
- * that timing matters, is gone; its mesh marks the exit line instead.
+ * Tiles (the game is read from the view each frame, so a game picked in the menus
+ * shows without a resize) draws its own flat view instead, as in Magic Tiles: the four
+ * lanes are the whole screen seen from straight above (`FlatLayout`, an orthographic
+ * camera), on a gradient backdrop with thin dividers, a faint line and a few sparkles,
+ * all in one full-screen shader. Its tiles are big ink blocks from their time up to
+ * the next tile's (`tileSpan`, the same extent the hit test and exit use), and its
+ * accent, the water lily, marks what happens: the next tile's tint, the pop of a
+ * claimed tile that then rides off translucent, a long tile filling with a rounded top.
+ * None of Rhythm's water, highway, fog, lane glow or hit line is drawn, and a miss
+ * shows on the tile, never on the lane. Its draw calls stay at six: the backdrop,
+ * blocks, the fills' rounded tops, claimed tiles, ripples (with the rings under held
+ * long tiles) and droplets. Each game's meshes are hidden while the other plays, so
+ * Rhythm still draws its eleven.
  */
 
 // Brand palette, kept in sync with src/style.css.
@@ -90,16 +120,26 @@ const LILY = new Color('#f7a8d8');
 const INK = new Color('#06141d');
 /** The tile, or both tiles of a double, to claim next. */
 const INK_NEXT = INK.clone().lerp(LILY, 0.2);
-/** A long tile claimed, its fill not yet risen this far. */
-const INK_CLAIMED = INK.clone().lerp(LILY, 0.5);
-const EXIT_LINE = LILY.clone().lerp(RIVER, 0.6);
+/** A long tile claimed, the part its fill has not reached yet. */
+const INK_CLAIMED = INK.clone().lerp(LILY, 0.12);
+/** A long tile's centre line and dot, while it waits. */
+const INK_MARK = INK.clone().lerp(FOAM, 0.28);
+/** A claimed tile riding off: added to what is under it, so it reads as translucent white. */
+const GHOST = new Color(0.2, 0.2, 0.2);
+/** The flat backdrop: river at the top, lighter water below, a lily glow at the bottom. */
+const BACKDROP_TOP = RIVER_RAISED.clone().lerp(RIVER_DEEP, 0.15);
+const BACKDROP_BOTTOM = RIVER_RAISED.clone().lerp(RIPPLE, 0.32);
 
 const MAX_TILES = 160;
 const MAX_HOLD_SEGMENTS = 32;
 const MAX_BRIDGES = 24;
 const MAX_FLASHES = 16;
-/** Tiles: long tiles popping at once (at most two hold at a time). */
-const MAX_COMPLETIONS = LANES;
+/** Tiles: rings under held long tiles (one per lane at most). */
+const MAX_RINGS = LANES;
+/** Tiles' flat view: blocks (tiles, long tiles in up to three parts), caps, claimed tiles. */
+const MAX_BLOCKS = MAX_TILES + 64;
+const MAX_CAPS = 32;
+const MAX_GHOSTS = MAX_TILES;
 const MAX_RIPPLES = 16;
 const MAX_DROPLETS = 160;
 
@@ -114,7 +154,13 @@ const DROPLET_S = 0.45;
 const LANE_PULSE_S = 0.3;
 /** Tiles: the "not yet" shake of a later tile. */
 const SHAKE_S = 0.28;
-const SHAKE_X = 0.07;
+/** Tiles: how far the shake reaches across the lane, lane widths. */
+const SHAKE_X = 0.06;
+/** Tiles: a gap left between tiles side by side, CSS px, so the divider shows. */
+const FLAT_GUTTER_PX = 1;
+/** Tiles: a long tile's centre line, CSS px wide, and its dot, lane widths across. */
+const FLAT_MARK_PX = 2;
+const FLAT_DOT = 0.16;
 /** Tiles warm towards foam over the last this-many real ms before the line. */
 const WARM_MS = 250;
 
@@ -197,6 +243,60 @@ void main() {
 }
 `;
 
+/**
+ * Tiles' backdrop: one full-screen pass, drawn behind everything in clip space. A
+ * vertical gradient in the river palette with a lily glow from below, a few faint
+ * sparkles drifting up, the faint line where a tile's time is, and the three lane
+ * dividers, 1 CSS px of white at about a fifth (antialiased with `fwidth`, so it needs
+ * no pixel ratio).
+ */
+const BACKDROP_VERTEX = /* glsl */ `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = vec4(position.xy, 0.9999, 1.0);
+}
+`;
+const BACKDROP_FRAGMENT = /* glsl */ `
+uniform float uTime;
+uniform vec2 uSize;
+uniform float uLine;
+uniform vec3 uTop;
+uniform vec3 uBottom;
+uniform vec3 uGlow;
+varying vec2 vUv;
+float hash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+void main() {
+  // CSS px from the top left.
+  vec2 px = vec2(vUv.x, 1.0 - vUv.y) * uSize;
+  float down = 1.0 - vUv.y;
+  vec3 colour = mix(uTop, uBottom, smoothstep(0.0, 1.0, down));
+  vec2 glow = (px - vec2(0.5 * uSize.x, 1.08 * uSize.y)) / max(uSize.x, uSize.y);
+  colour += uGlow * 0.2 * exp(-dot(glow, glow) * 4.0);
+  float fromLine = abs(px.y - uLine * uSize.y);
+  colour += vec3(0.07 * exp(-fromLine * fromLine / 450.0) + 0.16 * exp(-fromLine * fromLine / 2.0));
+  vec2 cell = vec2(px.x, px.y + uTime * 12.0) / 64.0;
+  vec2 id = floor(cell);
+  float seed = hash(id);
+  if (seed > 0.9) {
+    vec2 at = vec2(hash(id + 1.3), hash(id + 2.7)) * 0.7 + 0.15;
+    float dist = length(fract(cell) - at) * 64.0;
+    float twinkle = 0.5 + 0.5 * sin(uTime * (0.8 + seed * 2.0) + seed * 40.0);
+    colour += vec3(0.32 * twinkle * smoothstep(2.4, 0.2, dist));
+  }
+  float lane = uSize.x / 4.0;
+  float nearest = floor(px.x / lane + 0.5);
+  float dist = abs(px.x - nearest * lane);
+  float cover = clamp((0.5 - dist) / max(fwidth(px.x), 1e-4) + 0.5, 0.0, 1.0);
+  if (nearest < 0.5 || nearest > 3.5) cover = 0.0;
+  colour = mix(colour, vec3(1.0), cover * 0.22);
+  gl_FragColor = vec4(colour, 1.0);
+  #include <colorspace_fragment>
+}
+`;
+
 interface Resources {
   geometries: BufferGeometry[];
   materials: Material[];
@@ -213,15 +313,22 @@ interface Resources {
   line: Mesh;
   lineMaterial: MeshBasicMaterial;
   halo: Mesh;
-  /** What tiles are drawn with: heads, hold bodies and bridges. */
-  tileMaterials: MeshBasicMaterial[];
+  /** Drawn by Rhythm only: hidden while Tiles shows its flat view. */
+  rhythmOnly: Object3D[];
+  /** Tiles' flat view: the backdrop, its blocks, the fills' rounded tops, claimed tiles. */
+  backdrop: Mesh;
+  backdropMaterial: ShaderMaterial;
+  blocks: InstancedMesh;
+  caps: InstancedMesh;
+  ghosts: InstancedMesh;
+  flatOnly: Object3D[];
   root: Object3D;
 }
 
 /**
  * A pooled one-shot effect: lane, birth time and colour per slot, and where along the
- * lane: at the hit line (`at` NaN), or riding with a tile at chart ms `at` that lasts
- * `span` ms (Tiles' pops).
+ * lane: at the hit line (`at` NaN), or riding with a tile at chart ms `at` that is
+ * `span` ms tall (Tiles: at its middle).
  */
 interface Pool {
   lane: Int8Array;
@@ -229,8 +336,6 @@ interface Pool {
   colour: Color[];
   at: Float64Array;
   span: Float64Array;
-  /** Tiles' pops: the song ms the tile cleared at; NaN for feedback timed by `born`. */
-  songBorn: Float64Array;
   next: number;
 }
 
@@ -241,7 +346,6 @@ function createPool(size: number): Pool {
     colour: Array.from({ length: size }, () => new Color()),
     at: new Float64Array(size).fill(Number.NaN),
     span: new Float64Array(size),
-    songBorn: new Float64Array(size).fill(Number.NaN),
     next: 0,
   };
 }
@@ -254,13 +358,19 @@ export interface GameStage {
   /** Whether a lane is held, for its highlight. */
   setLaneHeld(isHeld: (lane: number) => boolean): void;
   /**
-   * Fits the camera to a viewport in CSS px, switching layout if its shape calls for
-   * another (`layout`). `insets` are the safe-area insets, which the tabletop layout
-   * keeps its lanes and top band inside.
+   * Fits the cameras to a viewport in CSS px: Rhythm's, switching its layout if the
+   * shape calls for another (`layout`), and Tiles' flat view. `insets` are the
+   * safe-area insets, which the tabletop layout keeps its lanes and top band inside
+   * (the flat view runs under them).
    */
   resize(width: number, height: number, insets?: Readonly<Insets>): void;
-  /** The layout in use: portrait is handheld, landscape tabletop. Changes in `resize`. */
+  /**
+   * Rhythm's layout for this viewport: portrait is handheld, landscape tabletop.
+   * Changes in `resize`. Tiles always draws its flat view (`drawing`).
+   */
   readonly layout: LayoutKind;
+  /** What the last frame drew: Rhythm's layout, or Tiles' flat view. */
+  readonly drawing: StageLayoutKind;
   /** Tiles: a tile that is not next yet was pressed; it shakes. */
   onNotYet(event: Readonly<NotYetEvent>): void;
   /** The lane under a client point, or undefined off the lanes. */
@@ -268,11 +378,11 @@ export interface GameStage {
   /** Tiles' hit test: the lane and the place along it under a client point. */
   spotAt(clientX: number, clientY: number): LaneSpot | undefined;
   /**
-   * Tiles: where this layout loses a tile, in scroll windows past the hit line (for
-   * `GameplaySession.setExitAlong`). Changes in `resize`.
+   * Tiles: the flat view's screen, for the simulation (`GameplaySession.setTilesFrame`):
+   * where tiles are lost and how tall they are. Changes in `resize`.
    */
-  exitAlong(): number;
-  /** The hit line's height on screen, 0 (top) to 1 (bottom). */
+  tilesFrame(): TilesFrame;
+  /** Rhythm's hit line height on screen, 0 (top) to 1 (bottom). */
   hitLineY(): number;
   /** Disposes and recreates every GPU resource. Call after a context restore. */
   rebuild(): void;
@@ -304,10 +414,18 @@ export function createGameStage({
   // Chosen again by `resize()`; everything below reads it when it is used.
   let layout: HighwayLayout = HANDHELD;
   const viewDepth = (point: Vector3) => -point.clone().applyMatrix4(camera.matrixWorldInverse).z;
+  // Tiles' flat view, framed in every resize whatever is drawn, so switching games
+  // in the menus needs no resize.
+  const flatCamera = new OrthographicCamera();
+  let flat: FlatLayout = flatLayout(390, 844);
+  frameFlat(flatCamera, flat);
+  /** Whether the last frame drew the flat view (Tiles). */
+  let drawsFlat = false;
 
   // Reused every frame and every touch.
   const dummy = new Object3D();
   const colour = new Color();
+  const tint = new Color();
   const projected = new Vector3();
   const laneGlow = new Float32Array(LANES);
   const lanePulse = new Float64Array(LANES).fill(-Infinity);
@@ -331,23 +449,40 @@ export function createGameStage({
   // The longest hold of the tiles drawn last, cached per tile list.
   let measured: readonly Tile[] | undefined;
   let longest = 0;
+  /**
+   * Tiles: each tile's span and the tallest (`tileSpan`), cached per tile list, scroll
+   * window and sizing: the extent the simulation presses and loses tiles by.
+   */
+  const sized: {
+    tiles: readonly Tile[] | undefined;
+    windowMs: number;
+    sizing: TileSizing;
+    spans: Float64Array;
+    tallest: number;
+  } = {
+    tiles: undefined,
+    windowMs: 0,
+    sizing: { base: 0, floor: 0, seam: 0 },
+    spans: new Float64Array(0),
+    tallest: 0,
+  };
   /** The view drawn last: feedback spawned between frames reads its song and game. */
   let shown: StageView | undefined;
-  /** Tiles' exit line, world z: set by `resize`. */
-  let exitZ = HANDHELD.near;
   /** Tiles: the tile shaking "not yet", and since when. */
   let shakeTile = -1;
   let shakeBorn = -Infinity;
-  /** Tiles: the long tiles popping this frame (filled by `layoutTiles`), and how far. */
-  const completions = {
-    lane: new Int8Array(MAX_COMPLETIONS),
-    at: new Float64Array(MAX_COMPLETIONS),
-    span: new Float64Array(MAX_COMPLETIONS),
-    age: new Float64Array(MAX_COMPLETIONS),
+  /** Tiles: rings under the long tiles held this frame (filled by `layoutFlat`). */
+  const rings = {
+    lane: new Int8Array(MAX_RINGS),
+    z: new Float64Array(MAX_RINGS),
     count: 0,
   };
   /** Tiles: long tiles whose completion has rippled, in the run of `runIn`. */
   const celebrated = new Set<number>();
+  /** Tiles: the song ms each tile was claimed at, in the run of `runIn` (its pop). */
+  let claimedAt = new Float64Array(0);
+  /** Tiles: the clock when the run's Classic failure was first shown (its blink). */
+  let failingSince = Number.NaN;
   /** The run Tiles' effects belong to: each run (restart, retry, new song) has its own. */
   let runIn: Simulation | undefined;
 
@@ -460,25 +595,60 @@ export function createGameStage({
     flashGeometry.rotateX(-Math.PI / 2);
     flashGeometry.translate(0, 0.012, 0);
     const flashMaterial = new MeshBasicMaterial({ ...additive });
-    const flashMesh = dynamicMesh(
-      flashGeometry,
-      flashMaterial,
-      MAX_FLASHES + MAX_COMPLETIONS,
-      root,
-    );
+    const flashMesh = dynamicMesh(flashGeometry, flashMaterial, MAX_FLASHES, root);
     flashMesh.name = 'flashes';
 
     const rippleGeometry = new RingGeometry(0.4, 0.46, 48);
     rippleGeometry.rotateX(-Math.PI / 2);
     rippleGeometry.translate(0, 0.006, 0);
     const rippleMaterial = new MeshBasicMaterial({ ...additive });
-    const rippleMesh = dynamicMesh(rippleGeometry, rippleMaterial, MAX_RIPPLES, root);
+    const rippleMesh = dynamicMesh(rippleGeometry, rippleMaterial, MAX_RIPPLES + MAX_RINGS, root);
+    rippleMesh.name = 'ripples';
 
     const dropletGeometry = new PlaneGeometry(1, 1);
     dropletGeometry.rotateX(-Math.PI / 2);
     dropletGeometry.translate(0, 0.02, 0);
     const dropletMaterial = new MeshBasicMaterial({ map: dotTexture, ...additive });
     const dropletMesh = dynamicMesh(dropletGeometry, dropletMaterial, MAX_DROPLETS, root);
+
+    // Tiles' flat view. Its parts never fog: the flat camera sees nothing far away.
+    const backdropGeometry = new PlaneGeometry(2, 2);
+    const backdropMaterial = new ShaderMaterial({
+      vertexShader: BACKDROP_VERTEX,
+      fragmentShader: BACKDROP_FRAGMENT,
+      uniforms: {
+        uTime: { value: 0 },
+        uSize: { value: new Vector2(1, 1) },
+        uLine: { value: 0.74 },
+        uTop: { value: BACKDROP_TOP.clone() },
+        uBottom: { value: BACKDROP_BOTTOM.clone() },
+        uGlow: { value: LILY.clone() },
+      },
+      depthTest: false,
+      depthWrite: false,
+    });
+    const backdrop = new Mesh(backdropGeometry, backdropMaterial);
+    backdrop.name = 'flat-backdrop';
+    backdrop.frustumCulled = false;
+    backdrop.renderOrder = -2;
+    root.add(backdrop);
+
+    // Unit squares on the lanes, scaled per block: tiles, long tiles and their parts.
+    const blockGeometry = new PlaneGeometry(1, 1);
+    blockGeometry.rotateX(-Math.PI / 2);
+    const blockMaterial = new MeshBasicMaterial({ fog: false });
+    const blocks = dynamicMesh(blockGeometry, blockMaterial, MAX_BLOCKS, root);
+    blocks.name = 'flat-tiles';
+    // A disc: the rounded top of a long tile's fill, and the dot of one waiting.
+    const capGeometry = new CircleGeometry(0.5, 40);
+    capGeometry.rotateX(-Math.PI / 2);
+    const capMaterial = new MeshBasicMaterial({ fog: false });
+    const caps = dynamicMesh(capGeometry, capMaterial, MAX_CAPS, root);
+    caps.name = 'flat-caps';
+    // Claimed tiles riding off, and their pop: added light, so they read as translucent.
+    const ghostMaterial = new MeshBasicMaterial({ ...additive });
+    const ghosts = dynamicMesh(blockGeometry, ghostMaterial, MAX_GHOSTS, root);
+    ghosts.name = 'flat-claimed';
 
     scene.add(root);
     return {
@@ -494,6 +664,9 @@ export function createGameStage({
         flashGeometry,
         rippleGeometry,
         dropletGeometry,
+        backdropGeometry,
+        blockGeometry,
+        capGeometry,
       ],
       materials: [
         water,
@@ -507,6 +680,10 @@ export function createGameStage({
         flashMaterial,
         rippleMaterial,
         dropletMaterial,
+        backdropMaterial,
+        blockMaterial,
+        capMaterial,
+        ghostMaterial,
       ],
       textures: [glowTexture, haloTexture, dotTexture],
       water,
@@ -520,7 +697,13 @@ export function createGameStage({
       line,
       lineMaterial,
       halo,
-      tileMaterials: [tileMaterial, bodyMaterial, bridgeMaterial],
+      rhythmOnly: [waterMesh, highwayMesh, glows, line, halo, tiles, bodies, bridges, flashMesh],
+      backdrop,
+      backdropMaterial,
+      blocks,
+      caps,
+      ghosts,
+      flatOnly: [backdrop, blocks, caps, ghosts],
       root,
     };
   };
@@ -554,6 +737,9 @@ export function createGameStage({
       old.flashes,
       old.ripples,
       old.droplets,
+      old.blocks,
+      old.caps,
+      old.ghosts,
     ]) {
       mesh.dispose();
     }
@@ -571,21 +757,22 @@ export function createGameStage({
     pool.colour[slot]?.copy(tint);
     pool.at[slot] = at;
     pool.span[slot] = span;
-    pool.songBorn[slot] = Number.NaN;
     return slot;
   };
 
   /**
-   * Tiles: drops another run's effects once a new run is shown. Its pops are timed and
-   * its ripples and droplets placed in its song time, which starts over: they would
-   * come back on water the new run left empty. Rhythm's feedback is timed in real
-   * time at the hit line (`at` NaN) and plays out.
+   * Tiles: drops another run's effects once a new run is shown. Its ripples and
+   * droplets are placed in its song time, which starts over: they would come back on
+   * lanes the new run left empty. Rhythm's feedback is timed in real time at the hit
+   * line (`at` NaN) and plays out.
    */
   const keepToRun = () => {
     const run = shown?.simulation;
     if (run === runIn) return;
     runIn = run;
     celebrated.clear();
+    claimedAt = new Float64Array(run?.heads.length ?? 0).fill(Number.NaN);
+    failingSince = Number.NaN;
     shakeTile = -1;
     for (const pool of [flashes, ripples, droplets]) {
       for (let i = 0; i < pool.lane.length; i += 1) {
@@ -597,7 +784,7 @@ export function createGameStage({
   /**
    * Tiles: how far through its pop (0 to 1) a tile that cleared at song ms `from` is,
    * in song time as the simulation lets a press on it go (`POP_MS` × tempo); NaN when
-   * it is not popping. Only while the run goes on: the fail rewind plays no pops back.
+   * it is not popping. Only while the run goes on: a frozen failure plays no pops.
    */
   const popAge = (from: number) => {
     const config = shown?.config;
@@ -608,33 +795,45 @@ export function createGameStage({
     return age >= 0 && age < 1 ? age : Number.NaN;
   };
 
-  /** Tiles: a long tile that has filled pops whole, from when it filled; it ripples once. */
-  const popCompletion = (index: number, tile: Tile, doneAt: number) => {
-    const age = popAge(doneAt);
-    if (Number.isNaN(age)) return;
-    const slot = completions.count;
-    if (slot < MAX_COMPLETIONS) {
-      completions.lane[slot] = tile.lane;
-      completions.at[slot] = tile.t;
-      completions.span[slot] = tile.dur ?? 0;
-      completions.age[slot] = age;
-      completions.count += 1;
+  /** Tiles' spans for the tiles in view (cached; see `sized`). */
+  const spansFor = (config: NonNullable<StageView['config']>) => {
+    const all = config.chart.difficulties[config.difficulty].tiles;
+    const windowMs = config.scrollDurationMs * config.tempo;
+    const sizing = tileSizing(config.tileSize, flatFrame(flat));
+    const same = sized.sizing;
+    if (
+      sized.tiles !== all ||
+      sized.windowMs !== windowMs ||
+      same.base !== sizing.base ||
+      same.floor !== sizing.floor ||
+      same.seam !== sizing.seam
+    ) {
+      sized.tiles = all;
+      sized.windowMs = windowMs;
+      sized.sizing = sizing;
+      sized.spans = tileSpans(all, windowMs, sizing);
+      sized.tallest = sized.spans.reduce((a, b) => Math.max(a, b), 0);
     }
+    return sized;
+  };
+
+  /** Tiles: a long tile that has filled ripples once, at its top. */
+  const celebrate = (index: number, tile: Tile, top: number) => {
     if (celebrated.has(index)) return;
     celebrated.add(index);
     if (still) return;
-    spawn(ripples, tile.lane, LILY, tileEnd(tile));
-    burst(tile.lane, LILY, 8, tileEnd(tile));
+    spawn(ripples, tile.lane, LILY, top);
+    burst(tile.lane, LILY, 8, top);
     pulse = Math.min(1, pulse + 0.25);
   };
 
-  /** World z of an effect slot this frame: on the line, or with its tile. */
+  /** World z of an effect slot this frame: on the line, or with its tile (Tiles). */
   const effectZ = (pool: Pool, slot: number) => {
     const at = pool.at[slot] ?? Number.NaN;
     const config = shown?.config;
     if (Number.isNaN(at) || !config || !shown) return 0;
     const windowMs = config.scrollDurationMs * config.tempo;
-    return tileDepth(at + (pool.span[slot] ?? 0) / 2, shown.songMs, windowMs, layout.far);
+    return tileDepth(at + (pool.span[slot] ?? 0) / 2, shown.songMs, windowMs, flat.far);
   };
 
   const burst = (lane: number, tint: Color, count: number, at = Number.NaN) => {
@@ -669,7 +868,6 @@ export function createGameStage({
     let tileCount = 0;
     let bodyCount = 0;
     let bridgeCount = 0;
-    completions.count = 0;
     if (!config) {
       res.tiles.count = 0;
       res.bodies.count = 0;
@@ -691,83 +889,17 @@ export function createGameStage({
       stage.state === 'failing' || stage.state === 'finished' ? simulation?.failure : undefined;
     const offender = failure?.kind === 'missedTile' ? failure.tileIndex : -1;
     const blink = still ? 0.5 : 0.5 + 0.5 * Math.sin(clock * 18);
-    const tiles = config.mode === 'tiles';
-    const exit = exitAlong(layout, exitZ);
-    /** Tiles: the time of the tile(s) to claim next, once found (they come first). */
-    let nextT = Number.NaN;
 
     for (let i = firstVisibleTile(all, songMs - behindMs, longest); i < all.length; i += 1) {
       const tile = all[i];
       if (!tile || tile.t > songMs + aheadMs) break;
       const head = simulation?.heads[i] ?? HEAD.pending;
       const tail = simulation?.tails[i] ?? TAIL.none;
-      // Past its late boundary (Tiles: its exit line): the Miss is only waiting for
-      // in-flight input.
-      const lapsed =
-        head === HEAD.pending &&
-        songMs >
-          (tiles
-            ? exitTime(tile.t, exit, config.scrollDurationMs, config.tempo)
-            : headDeadline(tile.t, config.tempo));
+      // Past its late boundary: the Miss is only waiting for in-flight input.
+      const lapsed = head === HEAD.pending && songMs > headDeadline(tile.t, config.tempo);
       const z = tileDepth(tile.t, songMs, windowMs, far);
-      if (tiles && head === HEAD.pending && !lapsed && Number.isNaN(nextT)) nextT = tile.t;
-      const isNext = tile.t === nextT && head === HEAD.pending && !lapsed;
 
-      if (tiles && tile.dur !== undefined && bodyCount + 2 <= MAX_HOLD_SEGMENTS) {
-        // A long tile: one tall tile, as wide as a head, that fills up when claimed.
-        const widen = tileWidth / BODY_WIDTH;
-        const endAt = tileDepth(tileEnd(tile), songMs, windowMs, far);
-        const top = Math.max(-far * 1.02, endAt);
-        // It slides over the exit line, off the end of the lanes.
-        const base = z + tileLength / 2;
-        const bottom = Math.min(exitZ, base);
-        const claimed = tail === TAIL.holding || tail === TAIL.suspended;
-        // It clears when full (or when its top falls off): from then on it pops, though
-        // its judgment arrives only after the session's finalization grace. A press on
-        // it is harmless for as long as the pop shows.
-        const doneAt =
-          tail === TAIL.clear
-            ? (simulation?.holdEndMs[i] ?? Number.NaN)
-            : tail === TAIL.holding
-              ? holdDoneTime(
-                  tile,
-                  simulation?.noteStartMs[i] ?? tile.t,
-                  exit,
-                  config.scrollDurationMs,
-                  config.tempo,
-                )
-              : Number.NaN;
-        if (songMs >= doneAt) {
-          popCompletion(i, tile, doneAt);
-        } else if (tail !== TAIL.clear && top < bottom) {
-          if (tail === TAIL.missed || head === HEAD.missed || lapsed) {
-            const stopped = simulation?.holdEndMs[i] ?? Number.NaN;
-            const from = Number.isNaN(stopped)
-              ? bottom
-              : Math.min(bottom, tileDepth(stopped, songMs, windowMs, far));
-            colour.copy(i === offender ? SNAG : MISSED_BODY);
-            placeSegment(res.bodies, bodyCount, tile.lane, from, top, widen);
-            bodyCount += 1;
-          } else if (claimed) {
-            // The fill rises from the bottom over the note's length.
-            const start = simulation?.noteStartMs[i] ?? Number.NaN;
-            const filled = Number.isNaN(start)
-              ? 0
-              : Math.min(1, Math.max(0, (songMs - start) / (tile.dur || 1)));
-            const level = Math.min(bottom, Math.max(top, base + (endAt - base) * filled));
-            colour.copy(LILY);
-            placeSegment(res.bodies, bodyCount, tile.lane, bottom, level, widen);
-            bodyCount += 1;
-            colour.copy(INK_CLAIMED);
-            placeSegment(res.bodies, bodyCount, tile.lane, level, top, widen);
-            bodyCount += 1;
-          } else {
-            colour.copy(isNext ? INK_NEXT : INK);
-            placeSegment(res.bodies, bodyCount, tile.lane, bottom, top, widen);
-            bodyCount += 1;
-          }
-        }
-      } else if (tile.dur !== undefined && bodyCount + 2 <= MAX_HOLD_SEGMENTS) {
+      if (tile.dur !== undefined && bodyCount + 2 <= MAX_HOLD_SEGMENTS) {
         const end = tileEnd(tile);
         const endZ = Math.max(-far * 1.02, tileDepth(end, songMs, windowMs, far));
         const startZ = Math.min(near, z);
@@ -805,18 +937,11 @@ export function createGameStage({
       if (head === HEAD.missed || lapsed) {
         colour.copy(i === offender ? SNAG : MISSED_TILE);
         if (i === offender) colour.lerp(FOAM, 0.25 * blink);
-      } else if (tiles) {
-        colour.copy(isNext ? INK_NEXT : INK);
       } else {
         const realUntil = (tile.t - songMs) / config.tempo;
         colour.copy(BILL).lerp(FOAM, Math.max(0, 1 - realUntil / WARM_MS) * 0.55);
       }
-      // Tiles: a later tile pressed too soon shakes its head ("not yet"); held still,
-      // it flushes lily instead.
-      const shake = i === shakeTile ? Math.max(0, 1 - (clock - shakeBorn) / SHAKE_S) : 0;
-      if (shake > 0 && still) colour.lerp(LILY, 0.45 * shake);
-      const sway = shake > 0 && !still ? Math.sin(shake * Math.PI * 6) * SHAKE_X * shake : 0;
-      dummy.position.set(laneX(tile.lane) + sway, 0, z);
+      dummy.position.set(laneX(tile.lane), 0, z);
       dummy.scale.setScalar(i === offender ? 1.08 : 1);
       dummy.updateMatrix();
       res.tiles.setMatrixAt(tileCount, dummy.matrix);
@@ -839,10 +964,7 @@ export function createGameStage({
         dummy.scale.set(Math.max(0.01, right - left), 1, 1);
         dummy.updateMatrix();
         res.bridges.setMatrixAt(bridgeCount, dummy.matrix);
-        res.bridges.setColorAt(
-          bridgeCount,
-          tiles ? colour.copy(isNext ? LILY : EXIT_LINE) : colour.copy(FOAM).lerp(BILL, 0.3),
-        );
+        res.bridges.setColorAt(bridgeCount, colour.copy(FOAM).lerp(BILL, 0.3));
         bridgeCount += 1;
       }
     }
@@ -852,19 +974,215 @@ export function createGameStage({
     res.bridges.count = bridgeCount;
   };
 
+  /**
+   * Tiles: whether a Classic failure's offender shows red now. It holds steady while
+   * the board slides back, blinks `TILES_FAIL_BLINKS` times, then stays red (steady
+   * throughout under reduced motion).
+   */
+  const failRed = () => {
+    if (still || Number.isNaN(failingSince)) return true;
+    const ms = (clock - failingSince) * 1000 - TILES_FAIL_SLIDE_MS;
+    if (ms < 0 || ms >= TILES_FAIL_BLINKS * TILES_FAIL_BLINK_MS) return true;
+    return ms % TILES_FAIL_BLINK_MS < TILES_FAIL_BLINK_MS / 2;
+  };
+
+  /**
+   * Tiles' flat view. Each tile is a block from its bottom edge (its time) to its top
+   * (`tileSpan` later), full lane width but for a gutter at the dividers: ink while
+   * it waits (tinted when it is next), a lily pop when claimed that then rides off
+   * translucent, red when it fell off. A long tile held fills with lily from the
+   * bottom, with a rounded top and a ring under it; once full it pops like a tap.
+   * Draw calls: the blocks, the fills' caps (and a waiting long tile's dot), and the
+   * claimed tiles; the shared ripples and droplets come in `layoutEffects`.
+   */
+  const layoutFlat = (res: Resources, stage: StageView) => {
+    const { config, simulation } = stage;
+    let blockCount = 0;
+    let capCount = 0;
+    let ghostCount = 0;
+    rings.count = 0;
+    if (!config) {
+      res.blocks.count = 0;
+      res.caps.count = 0;
+      res.ghosts.count = 0;
+      return;
+    }
+    const { far, near, unit } = flat;
+    const all = config.chart.difficulties[config.difficulty].tiles;
+    const { spans, tallest, sizing } = spansFor(config);
+    const { scrollDurationMs, tempo } = config;
+    const songMs = stage.songMs;
+    const windowMs = scrollDurationMs * tempo;
+    const exit = near / far;
+    const behindMs = exit * windowMs;
+    const aheadMs = windowMs * 1.02;
+    const failing = stage.state === 'failing' || stage.state === 'finished';
+    const failure = failing ? simulation?.failure : undefined;
+    if (failure && Number.isNaN(failingSince)) failingSince = clock;
+    const offender = failure?.kind === 'missedTile' ? failure.tileIndex : -1;
+    const red = failRed();
+    const width = LANE_WIDTH - FLAT_GUTTER_PX * unit;
+    const z = (ms: number) => tileDepth(ms, songMs, windowMs, far);
+
+    /** A block in a lane from z = bottom up to z = top, `lift` above the lanes. */
+    const block = (lane: number, bottom: number, top: number, across = width, x = 0, lift = 0) => {
+      if (blockCount >= MAX_BLOCKS) return;
+      dummy.position.set(laneX(lane) + x, lift, (bottom + top) / 2);
+      dummy.scale.set(across, 1, Math.max(0.0001, bottom - top));
+      dummy.updateMatrix();
+      res.blocks.setMatrixAt(blockCount, dummy.matrix);
+      res.blocks.setColorAt(blockCount, colour);
+      blockCount += 1;
+    };
+    /** A disc in a lane centred at z, `across` wide and `along` tall. */
+    const cap = (lane: number, at: number, across: number, along: number) => {
+      if (capCount >= MAX_CAPS) return;
+      dummy.position.set(laneX(lane), 0.002, at);
+      dummy.scale.set(across, 1, Math.max(0.0001, along));
+      dummy.updateMatrix();
+      res.caps.setMatrixAt(capCount, dummy.matrix);
+      res.caps.setColorAt(capCount, colour);
+      capCount += 1;
+    };
+    /** A claimed tile riding off, `age` (0 to 1, NaN when done) through its pop. */
+    const ghost = (lane: number, bottom: number, top: number, age: number) => {
+      if (ghostCount >= MAX_GHOSTS) return;
+      const pop = Number.isNaN(age) ? 0 : (1 - age) ** 2;
+      dummy.position.set(laneX(lane), 0.004, (bottom + top) / 2);
+      dummy.scale.set(width * (1 + 0.06 * pop), 1, Math.max(0.0001, bottom - top));
+      dummy.updateMatrix();
+      res.ghosts.setMatrixAt(ghostCount, dummy.matrix);
+      colour.copy(GHOST).multiplyScalar(1 - pop);
+      res.ghosts.setColorAt(ghostCount, colour.add(tint.copy(LILY).multiplyScalar(0.9 * pop)));
+      ghostCount += 1;
+    };
+    const missedColour = (index: number) =>
+      colour.copy(SNAG).lerp(INK, index === offender && !red ? 0.75 : 0);
+
+    /** Tiles: the time of the tile(s) to claim next, once found (they come first). */
+    let nextT = Number.NaN;
+    for (let i = firstVisibleTile(all, songMs - behindMs, tallest); i < all.length; i += 1) {
+      const tile = all[i];
+      if (!tile || tile.t > songMs + aheadMs) break;
+      const span = spans[i] ?? 0;
+      const top = z(tile.t + span);
+      const bottom = z(tile.t);
+      const head = simulation?.heads[i] ?? HEAD.pending;
+      const tail = simulation?.tails[i] ?? TAIL.none;
+      // Its top has left the screen: the Miss is only waiting for in-flight input.
+      const lapsed =
+        head === HEAD.pending && songMs > exitTime(tile.t + span, exit, scrollDurationMs, tempo);
+      if (head === HEAD.pending && !lapsed && Number.isNaN(nextT)) nextT = tile.t;
+      // Below the bottom edge, unless it is the failure the board shows.
+      if (top > near && i !== offender) continue;
+      const isNext = tile.t === nextT && head === HEAD.pending && !lapsed;
+
+      if (head === HEAD.missed || lapsed) {
+        missedColour(i);
+        block(tile.lane, bottom, top);
+        continue;
+      }
+      if (head === HEAD.pending) {
+        // Pressed too soon, it shakes its head ("not yet"); held still, it flushes lily.
+        const shake = i === shakeTile ? Math.max(0, 1 - (clock - shakeBorn) / SHAKE_S) : 0;
+        const sway = shake > 0 && !still ? Math.sin(shake * Math.PI * 6) * SHAKE_X * shake : 0;
+        colour.copy(isNext ? INK_NEXT : INK);
+        if (shake > 0 && still) colour.lerp(LILY, 0.45 * shake);
+        block(tile.lane, bottom, top, width, sway);
+        if (tile.dur !== undefined) {
+          // A long tile waiting: a thin line up its middle, and a dot near its foot.
+          const dot = FLAT_DOT;
+          colour.copy(INK_MARK);
+          block(tile.lane, bottom - dot * 1.5, top + dot, FLAT_MARK_PX * unit, sway, 0.001);
+          cap(tile.lane, bottom - dot, dot, dot);
+        }
+        continue;
+      }
+      if (tile.dur === undefined) {
+        ghost(tile.lane, bottom, top, popAge(claimedAt[i] ?? Number.NaN));
+        continue;
+      }
+
+      // A long tile claimed: filling, full, or let go too soon.
+      const start = simulation?.noteStartMs[i] ?? Number.NaN;
+      const doneAt =
+        tail === TAIL.clear
+          ? (simulation?.holdEndMs[i] ?? Number.NaN)
+          : tail === TAIL.holding
+            ? holdDoneTime(
+                tile,
+                span,
+                Number.isNaN(start) ? tile.t : start,
+                exit,
+                scrollDurationMs,
+                tempo,
+              )
+            : Number.NaN;
+      if (songMs >= doneAt) {
+        // Full (or its top off the screen): it pops whole from then, and rides off.
+        ghost(tile.lane, bottom, top, popAge(doneAt));
+        celebrate(i, tile, tile.t + span);
+        continue;
+      }
+      // The fill rises from the bottom over the note, reaching the top when full.
+      const length = (Number.isNaN(doneAt) ? tileEnd(tile) : doneAt) - start;
+      const filled =
+        Number.isNaN(start) || length <= 0
+          ? 0
+          : Math.min(1, Math.max(0, (songMs - start) / length));
+      const stopped = simulation?.holdEndMs[i] ?? Number.NaN;
+      const reached =
+        tail === TAIL.missed && !Number.isNaN(stopped) && !Number.isNaN(start)
+          ? Math.min(1, Math.max(0, (stopped - start) / (tile.dur || 1)))
+          : filled;
+      const level = bottom + (top - bottom) * reached;
+      if (tail === TAIL.missed) {
+        // Let go: what had filled rides off claimed, the rest is red.
+        if (reached > 0) ghost(tile.lane, bottom, level, Number.NaN);
+        missedColour(i);
+        block(tile.lane, level, top);
+        continue;
+      }
+      // Holding (or held through a pause): ink above the fill, then the fill and its
+      // rounded top, a half disc as wide as the lane.
+      colour.copy(INK_CLAIMED);
+      block(tile.lane, level, top);
+      const radius = Math.min(width / 2, (bottom - level) / 2);
+      if (bottom - level > 0.0001) {
+        colour.copy(LILY);
+        block(tile.lane, bottom, level + radius, width, 0, 0.001);
+        cap(tile.lane, level + radius, width, radius * 2);
+      }
+      if (tail === TAIL.holding && rings.count < MAX_RINGS) {
+        rings.lane[rings.count] = tile.lane;
+        rings.z[rings.count] = Math.min(level + radius, near);
+        rings.count += 1;
+      }
+    }
+
+    // An empty tap that ended the run: a red block where the finger landed.
+    if (failure?.kind === 'emptyTap' && failure.at !== undefined) {
+      const half = (sizing.floor * windowMs) / 2;
+      colour.copy(SNAG).lerp(INK, red ? 0 : 0.75);
+      block(failure.lane, z(failure.at - half), z(failure.at + half));
+    }
+
+    res.blocks.count = blockCount;
+    res.caps.count = capCount;
+    res.ghosts.count = ghostCount;
+  };
+
   const layoutLanes = (res: Resources, stage: StageView) => {
     const failure =
       stage.state === 'failing' || stage.state === 'finished'
         ? stage.simulation?.failure
         : undefined;
     const snagLane = failure?.kind === 'emptyTap' ? failure.lane : -1;
-    // Tiles' lanes only glow red: a glow at the hit line would say timing matters.
-    const quiet = stage.config?.mode === 'tiles';
     for (let lane = 0; lane < LANES; lane += 1) {
       const sincePulse = clock - (lanePulse[lane] ?? -Infinity);
       const sinceSnag = clock - (laneSnag[lane] ?? -Infinity);
       const pulseLevel = Math.max(0, 1 - sincePulse / LANE_PULSE_S);
-      const held = isLaneHeld(lane) && !quiet ? 0.55 : 0;
+      const held = isLaneHeld(lane) ? 0.55 : 0;
       laneGlow[lane] = Math.max(held, pulseLevel);
       if (lane === snagLane) {
         // An empty-tap failure: the pressed lane stays lit red at the line.
@@ -879,24 +1197,17 @@ export function createGameStage({
     if (res.glows.instanceColor) res.glows.instanceColor.needsUpdate = true;
   };
 
-  /** One flash, `age` (0 to 1) through, at world z `z`; `span` chart ms makes it a long tile's. */
+  /** One flash, `age` (0 to 1) through, at world z `z`. */
   const placeFlash = (
     res: Resources,
     slot: number,
     lane: number,
     z: number,
     age: number,
-    span: number,
     tint: Color,
   ) => {
-    // A Tiles pop covers its whole tile, a long one included.
-    const config = shown?.config;
-    const length =
-      span > 0 && config
-        ? 1 + (span / (config.scrollDurationMs * config.tempo)) * (layout.far / layout.tileDepth)
-        : 1;
     dummy.position.set(laneX(lane), 0, z);
-    dummy.scale.set(1 + age * 0.35, 1, (1 + age * 0.6) * length);
+    dummy.scale.set(1 + age * 0.35, 1, 1 + age * 0.6);
     dummy.updateMatrix();
     res.flashes.setMatrixAt(slot, dummy.matrix);
     res.flashes.setColorAt(slot, colour.copy(tint).multiplyScalar((1 - age) ** 2));
@@ -906,21 +1217,9 @@ export function createGameStage({
     let flashCount = 0;
     for (let i = 0; i < MAX_FLASHES; i += 1) {
       const lane = flashes.lane[i] ?? -1;
-      const songBorn = flashes.songBorn[i] ?? Number.NaN;
-      const age = Number.isNaN(songBorn)
-        ? (clock - (flashes.born[i] ?? -Infinity)) / FLASH_S
-        : popAge(songBorn);
+      const age = (clock - (flashes.born[i] ?? -Infinity)) / FLASH_S;
       if (lane < 0 || !(age < 1)) continue;
-      const span = flashes.span[i] ?? 0;
-      placeFlash(res, flashCount, lane, effectZ(flashes, i), age, span, flashes.colour[i] ?? FOAM);
-      flashCount += 1;
-    }
-    const config = shown?.config;
-    for (let i = 0; i < completions.count && config && shown; i += 1) {
-      const span = completions.span[i] ?? 0;
-      const windowMs = config.scrollDurationMs * config.tempo;
-      const z = tileDepth((completions.at[i] ?? 0) + span / 2, shown.songMs, windowMs, layout.far);
-      placeFlash(res, flashCount, completions.lane[i] ?? 0, z, completions.age[i] ?? 0, span, LILY);
+      placeFlash(res, flashCount, lane, effectZ(flashes, i), age, flashes.colour[i] ?? FOAM);
       flashCount += 1;
     }
     res.flashes.count = flashCount;
@@ -939,6 +1238,16 @@ export function createGameStage({
         rippleCount,
         colour.copy(ripples.colour[i] ?? RIPPLE).multiplyScalar((1 - age) ** 2),
       );
+      rippleCount += 1;
+    }
+    // Tiles: a soft ring under each long tile held, breathing with the clock.
+    for (let i = 0; i < rings.count; i += 1) {
+      const breath = still ? 0.5 : 0.5 + 0.5 * Math.sin(clock * 7);
+      dummy.position.set(laneX(rings.lane[i] ?? 0), 0.003, rings.z[i] ?? 0);
+      dummy.scale.setScalar(0.72 + 0.06 * breath);
+      dummy.updateMatrix();
+      res.ripples.setMatrixAt(rippleCount, dummy.matrix);
+      res.ripples.setColorAt(rippleCount, colour.copy(FOAM).multiplyScalar(0.35 + 0.2 * breath));
       rippleCount += 1;
     }
     res.ripples.count = rippleCount;
@@ -976,6 +1285,9 @@ export function createGameStage({
       res.flashes,
       res.ripples,
       res.droplets,
+      res.blocks,
+      res.caps,
+      res.ghosts,
     ]) {
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
@@ -989,6 +1301,17 @@ export function createGameStage({
     resources = build();
   };
 
+  /** A client point in the surface, as CSS px of the flat view, or undefined. */
+  const flatPoint = (clientX: number, clientY: number) => {
+    const rect = surface.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return undefined;
+    return flatSpotAt(
+      ((clientX - rect.left) / rect.width) * flat.width,
+      ((clientY - rect.top) / rect.height) * flat.height,
+      flat,
+    );
+  };
+
   return {
     render(stage, deltaSeconds, renderer) {
       shown = stage;
@@ -998,44 +1321,46 @@ export function createGameStage({
       if (!still) waterClock += deltaSeconds;
       pulse = still ? 0 : Math.max(0, pulse - deltaSeconds * 2.2);
       if (!resources) return;
-      const water = resources.water.uniforms;
-      if (water.uTime) water.uTime.value = waterClock;
-      if (water.uPulse) water.uPulse.value = pulse;
-      // Tiles: the hit line becomes a faint exit line, and its glow goes.
-      const tiles = stage.config?.mode === 'tiles';
-      resources.line.position.z = tiles ? exitZ : 0;
-      resources.lineMaterial.color.copy(tiles ? EXIT_LINE : RIPPLE);
-      resources.halo.visible = !tiles;
-      // Rhythm's tiles come out of the mist; Tiles' can be claimed from the top of the
-      // lane, so they show from there (one shader switch when the game changes).
-      for (const material of resources.tileMaterials) {
-        if (material.fog === tiles) {
-          material.fog = !tiles;
-          material.needsUpdate = true;
-        }
+      // The game decides the view, every frame: a game picked in the menus shows at once.
+      drawsFlat = stage.config?.mode === 'tiles';
+      for (const object of resources.rhythmOnly) object.visible = !drawsFlat;
+      for (const object of resources.flatOnly) object.visible = drawsFlat;
+      let view: Camera = camera;
+      if (drawsFlat) {
+        const backdrop = resources.backdropMaterial.uniforms;
+        if (backdrop.uTime) backdrop.uTime.value = waterClock;
+        if (backdrop.uLine) backdrop.uLine.value = flat.line;
+        (backdrop.uSize?.value as Vector2 | undefined)?.set(flat.width, flat.height);
+        layoutFlat(resources, stage);
+        view = flatCamera;
+      } else {
+        const water = resources.water.uniforms;
+        if (water.uTime) water.uTime.value = waterClock;
+        if (water.uPulse) water.uPulse.value = pulse;
+        layoutTiles(resources, stage);
+        layoutLanes(resources, stage);
       }
-      layoutTiles(resources, stage);
-      layoutLanes(resources, stage);
       layoutEffects(resources);
       markDirty(resources);
-      renderer.render(scene, camera);
+      renderer.render(scene, view);
     },
 
     onJudgment(event) {
       keepToRun();
       const config = shown?.config;
-      if (event.judgment !== 'miss' && config?.mode === 'tiles') {
-        laneSnag[event.lane] = -Infinity;
+      if (config?.mode === 'tiles') {
+        // Tiles shows a miss on the tile itself (`layoutFlat`), not on the lane.
+        if (event.judgment === 'miss') return;
         const tile = config.chart.difficulties[config.difficulty].tiles[event.tileIndex];
-        // A long tile pops whole from when it filled (`layoutTiles`), before this comes.
+        // A long tile pops whole from when it filled (`layoutFlat`), before this comes.
         if (!tile || event.unit === 'tail') return;
         // A tap, or a long tile's head, pops where it is when claimed, timed from the
         // claim in song time.
-        const slot = spawn(flashes, event.lane, LILY, tile.t);
-        flashes.songBorn[slot] = event.songMs;
+        if (event.tileIndex < claimedAt.length) claimedAt[event.tileIndex] = event.songMs;
         if (still) return;
-        spawn(ripples, event.lane, LILY, tile.t);
-        burst(event.lane, LILY, 5, tile.t);
+        const span = spansFor(config).spans[event.tileIndex] ?? 0;
+        spawn(ripples, event.lane, LILY, tile.t, span);
+        burst(event.lane, LILY, 5, tile.t + span / 2);
         pulse = Math.min(1, pulse + 0.25);
         return;
       }
@@ -1083,14 +1408,20 @@ export function createGameStage({
       const endDepth = viewDepth(projected.set(0, 0, -layout.far));
       fog.near = lineDepth + (endDepth - lineDepth) * layout.fogFrom;
       fog.far = endDepth;
-      exitZ = exitDepth(camera, layout, height, insets);
+      flat = flatLayout(width, height);
+      frameFlat(flatCamera, flat);
     },
 
     get layout() {
       return layout.kind;
     },
 
+    get drawing() {
+      return drawsFlat ? 'flat' : layout.kind;
+    },
+
     laneAt(clientX, clientY) {
+      if (drawsFlat) return flatPoint(clientX, clientY)?.lane;
       const rect = surface.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) return undefined;
       return laneAtNdc(
@@ -1102,18 +1433,11 @@ export function createGameStage({
     },
 
     spotAt(clientX, clientY) {
-      const rect = surface.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) return undefined;
-      return spotAtNdc(
-        camera,
-        ((clientX - rect.left) / rect.width) * 2 - 1,
-        -((clientY - rect.top) / rect.height) * 2 + 1,
-        layout,
-      );
+      return flatPoint(clientX, clientY);
     },
 
-    exitAlong() {
-      return exitAlong(layout, exitZ);
+    tilesFrame() {
+      return flatFrame(flat);
     },
 
     hitLineY() {
