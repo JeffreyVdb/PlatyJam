@@ -326,7 +326,21 @@ export function createGameplaySession({
     }
   };
 
-  const judgeTime = (timeStamp: number) => engine.timeline.judgeSongTime(timeStamp);
+  /**
+   * The song ms an input at `timeStamp` counts at. Rhythm judges timing, so it is
+   * calibrated (`judgeSongTime`). Tiles has no timing to judge: a tile can be claimed
+   * while it is shown, so its presses, releases and finalization all go by the board
+   * as shown at the event (`shownSongTime`), and the input calibration plays no part.
+   */
+  const inputTime = (timeStamp: number) =>
+    config?.mode === 'tiles'
+      ? engine.timeline.shownSongTime(timeStamp)
+      : engine.timeline.judgeSongTime(timeStamp);
+  /** `inputTime` for an input received right now, also once the clock has stopped. */
+  const inputTimeNow = () =>
+    config?.mode === 'tiles'
+      ? engine.timeline.shownSongTimeNow()
+      : engine.timeline.judgeSongTimeNow();
 
   // ---- start ----
 
@@ -393,9 +407,9 @@ export function createGameplaySession({
   const enterPause = (reason: PauseReason) => {
     if (!sim) return;
     clearTimer();
-    // In input time, as inputs are judged: read before the clock stops, or from the
-    // value the timeline kept when the audio already stopped it.
-    const settledUpTo = engine.timeline.judgeSongTimeNow();
+    // In input time, as inputs count: read before the clock stops, or from the value
+    // the timeline kept when the audio already stopped it.
+    const settledUpTo = inputTimeNow();
     engine.clock.pause();
     if (isPlaying()) {
       // Settle what is already decided at the pause, before anything is suspended:
@@ -538,10 +552,9 @@ export function createGameplaySession({
         return;
       }
       if (!isPlaying()) return;
-      // The tile under the finger is the one drawn there when it landed, whatever the
-      // input calibration; the calibrated time is when the press counts.
-      const aim = spot && aimOf(spot, engine.timeline.shownSongTime(timeStamp));
-      sim.press(id, lane, judgeTime(timeStamp), aim);
+      // Tiles: the tile under the finger is the one drawn there when it landed.
+      const songMs = inputTime(timeStamp);
+      sim.press(id, lane, songMs, spot && aimOf(spot, songMs));
       afterSimulation();
     },
     release(id, timeStamp) {
@@ -552,7 +565,7 @@ export function createGameplaySession({
         return;
       }
       if (!isPlaying()) return;
-      sim.release(id, judgeTime(timeStamp));
+      sim.release(id, inputTime(timeStamp));
       afterSimulation();
     },
     cancel() {
@@ -705,7 +718,7 @@ export function createGameplaySession({
     update() {
       if (!sim || !config || !isPlaying()) return;
       reach(engine.timeline.songTime());
-      const horizon = finalizationHorizon(judgeTime(now()), config.tempo);
+      const horizon = finalizationHorizon(inputTime(now()), config.tempo);
       sim.advance(horizon);
       afterSimulation();
       if (state === 'leadIn' && engine.clock.position() >= 0) setState('playing');

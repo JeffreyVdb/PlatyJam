@@ -1,3 +1,4 @@
+import type { InstancedMesh, Object3D, WebGLRenderer } from 'three';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEventBus } from '../app/events';
 import { createLifecycle, type Lifecycle } from '../app/lifecycle';
@@ -20,6 +21,7 @@ import {
 import type { SessionSetup, SessionState } from './session-contract';
 import { FINALIZE_GRACE_MS } from './simulation';
 import type { LaneSpot } from './input';
+import { createGameStage, type GameStage } from '../scene/game-stage';
 
 const tap = (t: number, lane: number, pitches = [60]): Tile => ({ t, lane, pitches, vel: 100 });
 const hold = (t: number, lane: number, dur: number): Tile => ({
@@ -1066,12 +1068,66 @@ describe('game session', () => {
     const SCROLL_MS = 1600;
     const loadTiles = (tiles: Tile[], overrides: Partial<SessionSetup> = {}) =>
       loaded(tiles, { mode: 'tiles', scrollDurationMs: SCROLL_MS, ...overrides });
-    /** A finger on the tile at chart ms `t`, at the current song time (1×). */
+    /** The song ms the stage shows now (it trails the clock by `outputLagMs`). */
+    const shownMs = () => fake.engine.timeline.shownSongTime(fake.perf);
+    /** A finger on the tile at chart ms `t`, where the stage shows it now (1×). */
     const on = (t: number): LaneSpot => ({
       lane: 0,
-      along: (songMs() - t) / SCROLL_MS,
+      along: (shownMs() - t) / SCROLL_MS,
       reach: 0.02,
     });
+    /**
+     * Frames of `step` ms until the stage shows song ms `target` (1×), the last one
+     * landing on it, each followed by `draw`.
+     */
+    const playTo = (target: number, step = 16, draw?: (ms: number) => void) => {
+      while (shownMs() + step < target) {
+        fake.advance(step);
+        session.update();
+        draw?.(step);
+      }
+      const rest = target - shownMs();
+      if (rest > 0) {
+        fake.advance(rest);
+        session.update();
+        draw?.(rest);
+      }
+    };
+    const stages: GameStage[] = [];
+    afterEach(() => {
+      for (const stage of stages.splice(0)) stage.dispose();
+    });
+    /** A real stage on this session, wired as `main.ts` wires it. */
+    const withStage = (width: number, height: number) => {
+      const stage = createGameStage({
+        surface: document.createElement('div'),
+        reducedMotion: () => false,
+      });
+      stages.push(stage);
+      stage.resize(width, height);
+      session.setExitAlong(stage.exitAlong());
+      session.events.on('judgment', (event) => {
+        stage.onJudgment(event);
+      });
+      let drawn: Object3D | undefined;
+      const renderer = {
+        render: (scene: Object3D) => {
+          drawn = scene;
+        },
+      } as unknown as WebGLRenderer;
+      return {
+        exitAlong: stage.exitAlong(),
+        draw: (ms: number) => {
+          stage.render(session.view(), ms / 1000, renderer);
+        },
+        /** Instances drawn last frame as `name`. */
+        count: (name: string) => (drawn?.getObjectByName(name) as InstancedMesh | undefined)?.count,
+      };
+    };
+    const LAYOUTS = [
+      ['handheld', 390, 844],
+      ['tabletop', 1024, 768],
+    ] as const;
     const touch = (input: string, lane: number, spot: LaneSpot) => {
       session.input.press(input, lane, fake.perf, { ...spot, lane });
     };
@@ -1093,9 +1149,9 @@ describe('game session', () => {
         touch('a', 0, { ...on(500 + edgeMs), reach: 64 / SCROLL_MS });
         expect(session.stats()).toMatchObject({ clear: 1, miss: 0 });
         expect(session.state).toBe('playing');
-        // Which tile is read from the board; when it counts is calibrated.
+        // Read from the board, and counted when it was shown: no calibration.
         expect(judged).toHaveLength(1);
-        expect(judged[0]).toBeCloseTo(200 - offsetMs, 6);
+        expect(judged[0]).toBeCloseTo(200, 6);
       });
     });
 
@@ -1228,6 +1284,62 @@ describe('game session', () => {
         accuracy: 100,
         perfectBadge: true,
         score: 300,
+      });
+    });
+
+    // Tiles has no timing to judge, so the input calibration never decides whether a
+    // tile can still be claimed: everything goes by the board as it was shown.
+    describe.each(LAYOUTS)('on the %s stage', (_, width, height) => {
+      describe.each([-100, 0, 100])('with an input offset of %s ms', (offsetMs) => {
+        let stage: ReturnType<typeof withStage>;
+        /** Starts a Classic run; the stage shows the song 40 ms behind the clock. */
+        const start = async (tiles: Tile[]) => {
+          await loadTiles(tiles);
+          stage = withStage(width, height);
+          fake.inputOffsetMs = offsetMs;
+          fake.outputLagMs = 40;
+          session.start();
+        };
+        const failure = () => session.view().simulation?.failure;
+
+        it('clears the next tile tapped just before it crosses the exit line', async () => {
+          await start([tap(500, 0), tap(3000, 1)]);
+          playTo(500 + stage.exitAlong * SCROLL_MS - 8);
+          touch('a', 0, on(500));
+          expect(session.stats()).toMatchObject({ clear: 1, miss: 0 });
+          expect(session.state).toBe('playing');
+        });
+
+        it('loses it once it has crossed, and Classic fails on that tile', async () => {
+          await start([tap(500, 0), tap(3000, 1)]);
+          playTo(500 + stage.exitAlong * SCROLL_MS + 8);
+          // The Miss still waits for the finalization grace; the tap brings it in.
+          expect(session.state).toBe('playing');
+          touch('a', 0, on(500));
+          expect(session.state).toBe('failing');
+          expect(failure()).toEqual({ kind: 'missedTile', lane: 0, tileIndex: 0 });
+          expect(session.stats()).toMatchObject({ clear: 0, miss: 1 });
+        });
+
+        it('fails a long tile let go just before it shows full', async () => {
+          await start([hold(500, 2, 400), tap(3000, 1)]);
+          playTo(-200);
+          touch('a', 2, on(500));
+          playTo(900 - 8);
+          release('a');
+          expect(session.state).toBe('failing');
+          expect(failure()).toEqual({ kind: 'missedTile', lane: 2, tileIndex: 0 });
+        });
+
+        it('clears a long tile let go just after it shows full', async () => {
+          await start([hold(500, 2, 400), tap(3000, 1)]);
+          playTo(-200);
+          touch('a', 2, on(500));
+          playTo(900 + 8);
+          release('a');
+          expect(session.state).toBe('playing');
+          expect(session.stats()).toMatchObject({ clear: 2, miss: 0 });
+        });
       });
     });
   });

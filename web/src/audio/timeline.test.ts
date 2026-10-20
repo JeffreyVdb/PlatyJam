@@ -176,4 +176,40 @@ describe('createTimeline', () => {
       expect(timeline.judgeSongTimeNow()).toBeCloseTo(3000 - 200, 9);
     });
   });
+
+  describe('shownSongTimeNow', () => {
+    it('reads what is shown now while the clock runs, with no input offset', () => {
+      const { state, clock, timeline, advance } = world({ skewMs: 250 });
+      state.offsets.inputOffsetMs = 200;
+      clock.setTempo(1.5);
+      clock.start(0);
+      advance(2);
+      expect(timeline.shownSongTimeNow()).toBeCloseTo(timeline.shownSongTime(state.perfMs), 9);
+      expect(timeline.shownSongTimeNow()).toBeCloseTo(3000, 9);
+    });
+
+    it('keeps what was shown just before pause() stopped the clock', () => {
+      const { state, clock, timeline, advance } = world();
+      // What is heard trails the context clock by 40 ms.
+      state.perfMs -= 40;
+      state.offsets.inputOffsetMs = 200;
+      clock.setTempo(1.5);
+      clock.start(0);
+      advance(2);
+      timeline.pause();
+      advance(5);
+      expect(clock.position()).toBeCloseTo(3000, 9);
+      expect(timeline.shownSongTimeNow()).toBeCloseTo(3000 - 40 * 1.5, 9);
+    });
+
+    it('falls back to the held position once something else stopped the clock', () => {
+      const { state, clock, timeline, advance } = world();
+      state.offsets.inputOffsetMs = 200;
+      clock.start(0);
+      advance(2);
+      clock.pause();
+      advance(1);
+      expect(timeline.shownSongTimeNow()).toBeCloseTo(2000, 9);
+    });
+  });
 });

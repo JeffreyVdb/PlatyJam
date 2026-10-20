@@ -16,7 +16,9 @@ import type { Chart, DifficultyName } from '../chart/schema';
  * - `rhythm`: hit each tile on the line, in time. Judged Perfect, Good or Miss.
  * - `tiles`: tap every tile, anywhere on it, before it falls off the screen; timing
  *   doesn't matter, but the tiles go in order. Judged Cleared or Miss. Where a tile
- *   falls off depends on the stage's layout (`GameplaySession.setExitAlong`).
+ *   falls off depends on the stage's layout (`GameplaySession.setExitAlong`). With no
+ *   timing to judge, the input calibration plays no part: a tile can be claimed while
+ *   it is shown, and inputs count at the song time the stage showed when they happened.
  */
 export const GAME_MODES = ['rhythm', 'tiles'] as const;
 export type GameMode = (typeof GAME_MODES)[number];
@@ -240,7 +242,10 @@ export interface JudgmentEvent {
   lane: number;
   /** Index into the difficulty's tiles; -1 for `empty`. */
   tileIndex: number;
-  /** Song ms at which it was judged. */
+  /**
+   * Song ms at which it was judged: Rhythm's inputs at their calibrated time, Tiles'
+   * at the song time shown when they happened.
+   */
   songMs: number;
   combo: number;
 }

@@ -55,8 +55,9 @@ export const FINALIZE_GRACE_MS = MAX_EVENT_LAG_MS;
 
 /**
  * The time up to which a frame may finalize: the song time at which an input
- * happening now would be judged (`timeline.judgeSongTime(performance.now())`, so
- * calibrated input latency is included), less the grace.
+ * happening now would count, less the grace. Rhythm's inputs count at
+ * `timeline.judgeSongTime(performance.now())`, so calibrated input latency is
+ * included; Tiles' at `timeline.shownSongTime(performance.now())`, the board as shown.
  */
 export function finalizationHorizon(inputNowSongMs: number, tempo: number): number {
   return inputNowSongMs - FINALIZE_GRACE_MS * tempo;
