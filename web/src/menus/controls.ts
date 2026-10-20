@@ -229,11 +229,14 @@ export function slider({
   value,
   onInput,
   onCommit,
+  describedBy,
 }: {
   label: string;
   value: number;
   onInput: (value: number) => void;
   onCommit: (value: number) => void;
+  /** The id of a hint that describes it. */
+  describedBy?: string;
 }): Slider {
   const field = el('div', 'slider-field');
   const labelId = uid('slider');
@@ -245,6 +248,7 @@ export function slider({
   control.setAttribute('role', 'slider');
   control.tabIndex = 0;
   control.setAttribute('aria-labelledby', labelId);
+  if (describedBy) control.setAttribute('aria-describedby', describedBy);
   control.setAttribute('aria-valuemin', '0');
   control.setAttribute('aria-valuemax', '100');
   const track = el('span', 'slider-track');

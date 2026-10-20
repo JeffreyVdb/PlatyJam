@@ -7,7 +7,7 @@ import { nearestScrollSpeed, SCROLL_SPEEDS } from './flow';
 import { GAMES, gamePreview } from './games';
 import { type Screen, screenFrame } from './screens';
 
-export type VolumeKind = 'masterVolume' | 'accompanimentVolume';
+export type VolumeKind = 'masterVolume' | 'accompanimentVolume' | 'effectsVolume';
 
 export interface SettingsScreenOptions {
   settings: () => Readonly<Settings>;
@@ -112,10 +112,11 @@ export function createSettingsScreen(options: SettingsScreenOptions): SettingsSc
     },
   });
 
-  const volume = (kind: VolumeKind, label: string) =>
+  const volume = (kind: VolumeKind, label: string, describedBy?: string) =>
     slider({
       label,
       value: initial[kind],
+      describedBy,
       onInput: (value) => {
         options.onVolume(kind, value);
       },
@@ -130,6 +131,13 @@ export function createSettingsScreen(options: SettingsScreenOptions): SettingsSc
     'settings-hint',
     'The notes PlatyJam plays along with you. Your own notes follow Volume.',
   );
+  const effectsHint = el(
+    'p',
+    'settings-hint',
+    'The taps, sparkles and misses in Tiles. Rhythm plays none.',
+  );
+  effectsHint.id = uid('effects-hint');
+  const effects = volume('effectsVolume', 'Effects', effectsHint.id);
 
   const outputLatency = el('p', 'settings-hint');
   const mutedHint = el('p', 'settings-hint');
@@ -152,7 +160,16 @@ export function createSettingsScreen(options: SettingsScreenOptions): SettingsSc
   column.append(
     group('Game', game.node),
     group('Playing', failMode.node, failHint, scroll.node, scrollHint),
-    group('Sound', master.node, accompaniment.node, accompanimentHint, outputLatency, muted),
+    group(
+      'Sound',
+      master.node,
+      accompaniment.node,
+      accompanimentHint,
+      effects.node,
+      effectsHint,
+      outputLatency,
+      muted,
+    ),
     group('Timing', timingText, timing, calibrateButton),
   );
   frame.body.append(column);
@@ -180,6 +197,7 @@ export function createSettingsScreen(options: SettingsScreenOptions): SettingsSc
     scrollHint.textContent = `Tiles take ${seconds(settings.scrollDurationMs)} to reach the line.`;
     master.set(settings.masterVolume);
     accompaniment.set(settings.accompanimentVolume);
+    effects.set(settings.effectsVolume);
     const { audioOffsetMs, inputOffsetMs } = options.offsets();
     timing.textContent =
       audioOffsetMs === 0 && inputOffsetMs === 0

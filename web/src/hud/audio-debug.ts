@@ -1,12 +1,13 @@
 import { loadBackingTrack } from '../audio/backing-track';
 import type { GameAudio } from '../audio/game-audio';
+import { EFFECTS } from '../audio/sfx';
 import type { DeviceChanges, OutputLatencyWatch } from '../audio/latency-watch';
 import { createSyncTest, type SyncSource } from '../audio/sync-test';
 
 /**
  * The ?debug Audio section: readouts for checking the engine on an iPad, a tap pad
- * for measuring tap-to-sound latency, the 3-minute sync test, and buttons for the
- * calibration and the interruption paths.
+ * for measuring tap-to-sound latency, the 3-minute sync test, buttons for the
+ * calibration and the interruption paths, and one per sound effect to audition it.
  */
 export interface AudioDebugOptions {
   audio: GameAudio;
@@ -23,6 +24,8 @@ const TEMPOS = [0.75, 1, 1.25, 1.5] as const;
 /** C5: a bright attack, easy to spot in a recording. */
 const PAD_PITCH = 72;
 const BEAT_FLASH_MS = 90;
+/** How long the Fill button's long tile fills, seconds. */
+const FILL_AUDITION_S = 2;
 /** The debug song's recording, which the sync test's `file` source plays. */
 const SYNC_FILE = 'songs/debug-backing.m4a';
 
@@ -114,6 +117,7 @@ export function createAudioDebugSection({
       accompaniment.stopAll(200);
       backing.stopAll(200);
       piano.stopAll(200);
+      audio.effects.stopAll(200);
     }),
     button('Simulate pause', () => {
       engine.simulateInterruption();
@@ -139,6 +143,26 @@ export function createAudioDebugSection({
       refresh();
     },
   );
+
+  // Sound effects, each played as in a run (at the Effects volume).
+  const effectsBox = el('div', 'debug-effects');
+  effectsBox.setAttribute('role', 'group');
+  const effectsCaption = el('p', 'debug-status', 'Sound effects (Tiles)');
+  effectsCaption.id = 'debug-effects-caption';
+  effectsBox.setAttribute('aria-labelledby', effectsCaption.id);
+  const effectsRow = el('div', 'debug-choice');
+  const title = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
+  effectsRow.append(
+    ...EFFECTS.map((effect) =>
+      button(title(effect), () => {
+        audio.effects.play(effect);
+      }),
+    ),
+    button('Fill', () => {
+      audio.effects.fill(FILL_AUDITION_S);
+    }),
+  );
+  effectsBox.append(effectsCaption, effectsRow);
 
   // Tap pad: the sound starts in the pointerdown handler, with nothing in between.
   const pad = el('button', 'tap-pad');
@@ -203,7 +227,7 @@ export function createAudioDebugSection({
     syncReadout,
   );
 
-  section.append(status, actions, fakeLatency, pad, syncBox);
+  section.append(status, actions, fakeLatency, effectsBox, pad, syncBox);
 
   // Device changes: whether (and when) the browser reports a route change.
   const deviceChanges: string[] = [];

@@ -34,6 +34,8 @@ export interface Settings {
   masterVolume: number;
   /** 0 to 1: the notes the game plays by itself, not the player's. */
   accompanimentVolume: number;
+  /** 0 to 1: Tiles' sound effects. Saves from before it read as the default. */
+  effectsVolume: number;
   /** The song and difficulty last picked, so song select opens on them. */
   songId: string | null;
   difficulty: DifficultyName;
@@ -77,6 +79,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   tempo: 1,
   masterVolume: 1,
   accompanimentVolume: 1,
+  effectsVolume: 0.7,
   songId: null,
   difficulty: 'normal',
   latencyWarningMutedAtMs: null,
@@ -126,8 +129,14 @@ function oneOf<T>(options: readonly T[], value: unknown, fallback: T): T {
 function parseSettings(json: unknown): Settings {
   const fields = isRecord(json) ? json : {};
   const d = DEFAULT_SETTINGS;
-  const { scrollDurationMs, masterVolume, accompanimentVolume, songId, latencyWarningMutedAtMs } =
-    fields;
+  const {
+    scrollDurationMs,
+    masterVolume,
+    accompanimentVolume,
+    effectsVolume,
+    songId,
+    latencyWarningMutedAtMs,
+  } = fields;
   const seen = isRecord(fields.seenIntro) ? fields.seenIntro : {};
   return {
     gameMode: oneOf(GAME_MODES, fields.gameMode, d.gameMode),
@@ -144,6 +153,7 @@ function parseSettings(json: unknown): Settings {
     accompanimentVolume: isNumberIn(accompanimentVolume, 0, 1)
       ? accompanimentVolume
       : d.accompanimentVolume,
+    effectsVolume: isNumberIn(effectsVolume, 0, 1) ? effectsVolume : d.effectsVolume,
     songId: typeof songId === 'string' && SLUG.test(songId) ? songId : d.songId,
     difficulty: oneOf(DIFFICULTIES, fields.difficulty, d.difficulty),
     latencyWarningMutedAtMs: isNumberIn(latencyWarningMutedAtMs, 0, MAX_LATENCY_MS)

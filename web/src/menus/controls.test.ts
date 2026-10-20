@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { gestureButton } from './controls';
+import { gestureButton, slider } from './controls';
 
 const touch = (target: Element, type: 'pointerdown' | 'pointerup', pointerId = 1) =>
   target.dispatchEvent(
@@ -117,5 +117,24 @@ describe('gesture buttons', () => {
     touch(node, 'pointerup');
     click(row.label);
     expect(row.input.checked).toBe(true);
+  });
+});
+
+describe('slider', () => {
+  const make = (describedBy?: string) =>
+    slider({
+      label: 'Effects',
+      value: 0.7,
+      onInput: vi.fn(),
+      onCommit: vi.fn(),
+      describedBy,
+    }).node.querySelector('[role="slider"]');
+
+  it('is described by its hint when it has one', () => {
+    expect(make('effects-hint')?.getAttribute('aria-describedby')).toBe('effects-hint');
+  });
+
+  it('has no description without one', () => {
+    expect(make()?.hasAttribute('aria-describedby')).toBe(false);
   });
 });

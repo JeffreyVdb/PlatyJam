@@ -311,6 +311,11 @@ body {
   margin-top: 8px;
 }
 
+/* The sound effects row: its caption sits close above it. */
+.debug-effects .debug-status {
+  margin: 12px 0 0;
+}
+
 .debug-choice .hud-button {
   min-width: 44px;
   padding: 0 12px;

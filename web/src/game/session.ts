@@ -5,7 +5,9 @@ import type { AudioEngine } from '../audio/engine';
 import type { LoadProgress, PianoSamples } from '../audio/piano-samples';
 import type { PianoVoice, Sampler } from '../audio/sampler';
 import { type Accompaniment, PAUSE_FADE_MS } from '../audio/scheduler';
+import type { EffectsPlayer, FillVoice } from '../audio/sfx';
 import type { Chart, DifficultyName, Tile } from '../chart/schema';
+import { effectCues, GAME_EFFECTS } from './effect-cues';
 import type { LaneInputSink, LaneSpot } from './input';
 import { accuracyOf, earnsPerfectBadge, starsFor } from './scoring';
 import type {
@@ -30,7 +32,7 @@ import {
   TAIL,
   type TileAim,
 } from './simulation';
-import { createTilesSimulation, DEFAULT_EXIT_ALONG } from './tiles-simulation';
+import { createTilesSimulation, DEFAULT_EXIT_ALONG, holdDoneTime } from './tiles-simulation';
 
 // Tunable presentation and audio timings.
 
@@ -63,6 +65,8 @@ export interface SessionAudio {
   accompaniment: Pick<Accompaniment, 'play' | 'pause' | 'stopAll'>;
   /** The song's recording, loaded with the song (`chart.audio`). */
   backing: Pick<BackingPlayer, 'load' | 'state' | 'play' | 'pause' | 'stopAll'>;
+  /** Tiles' sound effects; what plays for each judgment is `effectCues`. */
+  effects: Pick<EffectsPlayer, 'play' | 'fill' | 'prepare' | 'stopFills' | 'stopAll'>;
   /** Tunes both pianos to a recording at this speed; 1 is concert pitch. */
   setTuning(rate: number): void;
   samples: {
@@ -128,7 +132,7 @@ export function createGameplaySession({
   bus,
   now = () => performance.now(),
 }: GameplaySessionOptions): GameplaySession {
-  const { engine, piano, accompaniment, backing, samples } = audio;
+  const { engine, piano, accompaniment, backing, effects, samples } = audio;
   const events = createEventBus<SessionEvents>();
 
   let state: SessionState = 'loading';
@@ -151,6 +155,11 @@ export function createGameplaySession({
    * the context time each is due. A pause cancels them; resuming schedules them again.
    */
   const waiting = new Map<number, number>();
+  /**
+   * Tiles: long tiles filling, with their fill effect. A pause stops the sound and
+   * keeps the tile (`undefined`); resuming picks it up again if the tile is held.
+   */
+  const fills = new Map<number, FillVoice | undefined>();
   let exitAlong = DEFAULT_EXIT_ALONG;
   /** The furthest progress this run has reached; a failure never takes it back. */
   let furthest = 0;
@@ -224,12 +233,51 @@ export function createGameplaySession({
       holdVoices.delete(event.tileIndex);
       waiting.delete(event.tileIndex);
     }
+    playEffects(event);
     events.emit('judgment', { ...event });
+  };
+
+  /**
+   * Tiles' sound effects for a judgment (`effectCues`; Rhythm has none). Judgments
+   * come synchronously from the input handler, so a tap's knock starts in the tap.
+   */
+  const playEffects = (event: Readonly<JudgmentEvent>) => {
+    if (!config) return;
+    const cues = effectCues(event, config.mode);
+    for (const effect of cues.oneShots) effects.play(effect);
+    if (cues.fill === 'start') {
+      startFill(event.tileIndex, event.songMs);
+    } else if (cues.fill === 'stop') {
+      fills.get(event.tileIndex)?.stop();
+      fills.delete(event.tileIndex);
+    }
+  };
+
+  /**
+   * Tiles: a long tile's fill from song time `songMs` on, over the time the tile
+   * fills (from its note's start to `holdDoneTime`). Claimed early, it starts on the
+   * beat with the note.
+   */
+  const startFill = (index: number, songMs: number) => {
+    const tile = tiles()[index];
+    const startMs = sim?.noteStartMs[index];
+    if (!config || tile?.dur === undefined || startMs === undefined) return;
+    const { scrollDurationMs, tempo } = config;
+    const doneMs = holdDoneTime(tile, startMs, exitAlong, scrollDurationMs, tempo);
+    const seconds = (songSpan: number) => songSpan / tempo / 1000;
+    const durationS = seconds(doneMs - startMs);
+    fills.set(
+      index,
+      startMs > songMs
+        ? effects.fill(durationS, { when: engine.timeline.startTimeFor(startMs) })
+        : effects.fill(durationS, { offsetS: seconds(songMs - startMs) }),
+    );
   };
 
   const newSimulation = () => {
     holdVoices.clear();
     waiting.clear();
+    fills.clear();
     furthest = 0;
     if (!config) return undefined;
     const options: SimulationOptions = {
@@ -285,14 +333,21 @@ export function createGameplaySession({
     };
   };
 
+  /**
+   * Quiets the song. Effects already playing ring on: a Classic failure's miss thud
+   * is heard as the song falls silent. Only the fills stop; `endRun` and a pause stop
+   * the rest.
+   */
   const silence = (fadeMs: number) => {
     accompaniment.stopAll(fadeMs);
     backing.stopAll(fadeMs);
     piano.stopAll(fadeMs);
+    effects.stopFills(fadeMs);
     // Notes struck outside a run (the ?debug tap pad) are in concert pitch.
     audio.setTuning(1);
     holdVoices.clear();
     waiting.clear();
+    fills.clear();
   };
 
   /** Runs state transitions the simulation calls for. */
@@ -424,6 +479,9 @@ export function createGameplaySession({
     accompaniment.pause(PAUSE_FADE_MS);
     backing.pause(PAUSE_FADE_MS);
     piano.stopAll(PAUSE_FADE_MS);
+    // No effect sounds while paused; fills start again for long tiles held again.
+    effects.stopAll(PAUSE_FADE_MS);
+    for (const index of fills.keys()) fills.set(index, undefined);
     holdVoices.clear();
     // Tiles notes still waiting for their beat were cancelled with the rest; they are
     // scheduled again on resume. Those already sounding are done.
@@ -482,6 +540,7 @@ export function createGameplaySession({
     countdown = undefined;
     engine.resumeClock();
     resumeWaitingNotes();
+    resumeFills();
     setState(engine.clock.position() < 0 ? 'leadIn' : 'playing');
   };
 
@@ -498,6 +557,19 @@ export function createGameplaySession({
     }
   };
 
+  /** Tiles: picks up the fills a pause stopped, for long tiles held again. */
+  const resumeFills = () => {
+    if (!sim || fills.size === 0) return;
+    const current = sim;
+    for (const index of [...fills.keys()]) {
+      if (current.tails[index] === TAIL.holding && engine.clock.isRunning) {
+        startFill(index, engine.clock.position());
+      } else {
+        fills.delete(index);
+      }
+    }
+  };
+
   // ---- quitting ----
 
   const endRun = () => {
@@ -505,6 +577,7 @@ export function createGameplaySession({
     clearTimer();
     engine.clock.pause();
     silence(QUIT_FADE_MS);
+    effects.stopAll(QUIT_FADE_MS);
     input?.clear();
     pauseInfo = undefined;
     countdown = undefined;
@@ -660,6 +733,8 @@ export function createGameplaySession({
           }
           // `mode` picks the rules: see `newSimulation`.
           config = { ...rest, chart: loaded };
+          // Rendered now, so the first tap does not wait for them.
+          if (GAME_EFFECTS[config.mode]) effects.prepare();
           sim = newSimulation();
           setState('ready');
         },
