@@ -11,9 +11,12 @@ import type { Chart, DifficultyName } from '../chart/schema';
  */
 
 /**
- * The two games. `rhythm`: hit each tile on the line, in time. `tiles`: tap every tile
- * before it falls off; timing doesn't matter. Tiles has no rules of its own yet
- * (PLA-14): a session loaded with it plays Rhythm.
+ * The two games, on the same songs, charts and settings:
+ *
+ * - `rhythm`: hit each tile on the line, in time. Judged Perfect, Good or Miss.
+ * - `tiles`: tap every tile, anywhere on it, before it falls off the screen; timing
+ *   doesn't matter, but the tiles go in order. Judged Cleared or Miss. Where a tile
+ *   falls off depends on the stage's layout (`GameplaySession.setExitAlong`).
  */
 export const GAME_MODES = ['rhythm', 'tiles'] as const;
 export type GameMode = (typeof GAME_MODES)[number];
@@ -38,6 +41,7 @@ export const MAX_SCROLL_DURATION_MS = 4000;
 export interface SessionSetup {
   /** The chart, or the download that delivers it (the session waits in `loading`). */
   chart: Chart | Promise<Chart>;
+  /** The game: it picks the rules (judgment, scoring, misses) the run is played by. */
   mode: GameMode;
   difficulty: DifficultyName;
   tempo: Tempo;
@@ -157,17 +161,30 @@ export interface LoadingInfo {
   backing: 'none' | 'loading' | 'loaded' | 'failed';
 }
 
-export type Judgment = 'perfect' | 'good' | 'miss';
+/**
+ * How a unit went. Rhythm judges timing (`perfect`, `good`); Tiles only whether a
+ * unit was cleared (`clear`). Both have `miss`. `MODE_JUDGMENTS` lists each game's.
+ */
+export type Judgment = 'perfect' | 'good' | 'clear' | 'miss';
 
 /** The scoring numbers, live while playing and final in the results. */
 export interface ScoreStats {
   score: number;
   combo: number;
   maxCombo: number;
+  /** Rhythm's judgments; 0 in Tiles. */
   perfect: number;
   good: number;
+  /**
+   * Tiles: units cleared; 0 in Rhythm. Optional so stats written before Tiles still
+   * type-check; the session always sets it.
+   */
+  clear?: number;
   miss: number;
-  /** `100 * (perfect + 0.5 * good) / resolved units`; 0 before any unit resolves. */
+  /**
+   * `100 * (perfect + clear + 0.5 * good) / resolved units`; 0 before any unit
+   * resolves. In Tiles that is cleared ÷ resolved.
+   */
   accuracy: number;
 }
 
@@ -185,9 +202,12 @@ export interface LiveStats extends ScoreStats {
 export type Outcome = 'cleared' | 'failed';
 
 export type Failure =
-  /** A tile's window passed unhit, or a hold was released early. */
+  /**
+   * Rhythm: a tile's window passed unhit. Tiles: a tile fell off the screen. Both: a
+   * hold was released early.
+   */
   | { kind: 'missedTile'; lane: number; tileIndex: number }
-  /** A press in a lane with nothing to hit. */
+  /** A press with nothing to hit: an empty lane (Rhythm), the water between tiles (Tiles). */
   | { kind: 'emptyTap'; lane: number };
 
 export interface FinalResults extends ScoreStats {
@@ -208,7 +228,7 @@ export interface FinalResults extends ScoreStats {
   progress: number;
   /** 0 to 3; stars earned before a failure are kept. */
   stars: number;
-  /** Cleared with no Good and no Miss. */
+  /** Cleared with no Good and no Miss (Tiles has no Good: with no Miss). */
   perfectBadge: boolean;
 }
 
@@ -225,9 +245,19 @@ export interface JudgmentEvent {
   combo: number;
 }
 
+/**
+ * Tiles: a tap on a tile that is not next yet (an earlier one waits). It is ignored,
+ * with no penalty; the stage shakes the tile.
+ */
+export interface NotYetEvent {
+  lane: number;
+  tileIndex: number;
+}
+
 export interface SessionEvents {
   statechange: { state: SessionState; previous: SessionState };
   judgment: JudgmentEvent;
+  notyet: NotYetEvent;
   /** The countdown advanced (3, 2, 1) or its reclaimed lanes changed. */
   countdown: CountdownInfo;
   /** Paused info changed (for example audio recovery progressed). */

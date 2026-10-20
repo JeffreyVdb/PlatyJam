@@ -17,8 +17,8 @@ import type { Failure, FailMode, Judgment, JudgmentEvent } from './session-contr
  * arrive (see `finalizationHorizon`).
  */
 
-/** Head state per tile. */
-export const HEAD = { pending: 0, perfect: 1, good: 2, missed: 3 } as const;
+/** Head state per tile. `clear` is Tiles' (`tiles-simulation.ts`), the others Rhythm's. */
+export const HEAD = { pending: 0, perfect: 1, good: 2, missed: 3, clear: 4 } as const;
 /** Tail state per tile (holds only; taps stay `none`). */
 export const TAIL = {
   none: 0,
@@ -29,7 +29,18 @@ export const TAIL = {
   suspended: 3,
   perfect: 4,
   missed: 5,
+  /** Tiles: the hold filled up. */
+  clear: 6,
 } as const;
+
+/**
+ * Tiles: where a pointer press landed along its lane, as the chart ms a tile drawn
+ * there has, and how far either side of a tile (chart ms) a press still counts.
+ */
+export interface TileAim {
+  ms: number;
+  reachMs: number;
+}
 
 export type SimulationStatus = 'running' | 'failed' | 'complete';
 
@@ -77,9 +88,17 @@ export interface Simulation {
   readonly tails: Readonly<Uint8Array>;
   /** Per hold: song ms at which holding stopped (release or completion); NaN before. */
   readonly holdEndMs: Readonly<Float64Array>;
+  /**
+   * Per tile: song ms at which its note starts once its head was hit or claimed (Rhythm:
+   * the hit; Tiles: see `TILES_RULES.melody`); NaN before.
+   */
+  readonly noteStartMs: Readonly<Float64Array>;
 
-  /** A lane was pressed at chart ms `songMs`. `input` names the finger or key. */
-  press(input: string, lane: number, songMs: number): void;
+  /**
+   * A lane was pressed at chart ms `songMs`. `input` names the finger or key. `aim` is
+   * where a pointer landed along the lane; Tiles uses it, Rhythm judges lanes only.
+   */
+  press(input: string, lane: number, songMs: number, aim?: TileAim): void;
   /** That input was released. */
   release(input: string, songMs: number): void;
   /** Time reached `songMs`: finalize expiries and completions before it. */
@@ -100,6 +119,11 @@ export interface Simulation {
   reclaimedLanes(): number[];
   /** Play continues at `songMs`: holds not reclaimed become tail Misses. */
   resume(songMs: number): void;
+  /**
+   * Tiles: where the stage's layout loses a tile, past the hit line in scroll windows
+   * (it changes with the layout). Rhythm has no exit line and ignores it.
+   */
+  setExitAlong(along: number): void;
 }
 
 export function createSimulation({
@@ -113,6 +137,7 @@ export function createSimulation({
   const heads = new Uint8Array(count);
   const tails = new Uint8Array(count);
   const holdEndMs = new Float64Array(count).fill(Number.NaN);
+  const noteStartMs = new Float64Array(count).fill(Number.NaN);
   const score = createScore();
 
   const laneTiles: number[][] = Array.from({ length: LANES }, () => []);
@@ -266,6 +291,7 @@ export function createSimulation({
     heads,
     tails,
     holdEndMs,
+    noteStartMs,
 
     press(input, lane, songMs) {
       if (status !== 'running' || !finalize(songMs)) return;
@@ -287,6 +313,7 @@ export function createSimulation({
       }
 
       heads[index] = judgment === 'perfect' ? HEAD.perfect : HEAD.good;
+      noteStartMs[index] = songMs;
       if (tile.dur === undefined) {
         judge('tap', judgment, lane, index, songMs);
         return;
@@ -352,6 +379,10 @@ export function createSimulation({
       for (let index = 0; index < count && status === 'running'; index += 1) {
         if (tails[index] === TAIL.suspended) finishTail(index, 'miss', songMs);
       }
+    },
+
+    setExitAlong() {
+      // Rhythm loses a tile at the end of its window, wherever the stage draws it.
     },
   };
 
