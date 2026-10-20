@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Tile } from '../chart/schema';
+import type { Chart, Tile } from '../chart/schema';
 import {
   DEFAULT_TILES_FRAME,
   firstVisibleTile,
@@ -166,6 +166,62 @@ describe('Tiles tile sizing', () => {
     expect(short).toBeCloseTo(ms(normal.base), 9);
     const crowded = [at(0, 2, 1500), at(1000, 2)];
     expect(spans(crowded, normal)[0]).toBeCloseTo(1000 - ms(normal.seam), 9);
+  });
+
+  it('stops looking ahead only once no tile can shorten it, the seam included', () => {
+    // A long tile, then a tap in another lane past its note's end, then one in its own
+    // lane, closer than its note's end plus the seam: that cap still applies.
+    const sizing = { base: 0.5, floor: 0.25, seam: 0.01 };
+    const tiles = [at(0, 0, 500), at(501, 1), at(502, 0)];
+    expect(tileSpan(tiles, 0, 1000, sizing)).toBeCloseTo(492, 9);
+    expect(tileSpan(tiles, 0, 1000, sizing)).toBe(tileSpans(tiles, 1000, sizing)[0]);
+  });
+
+  describe('gives each tile the same span one at a time as all at once', () => {
+    const shipped = import.meta.glob<Chart>('../../public/songs/*.json', {
+      eager: true,
+      import: 'default',
+    });
+    // A dense chart, seeded: doubles, long tiles, gaps around the base and the seam.
+    let seed = 7;
+    const random = () => {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    };
+    const dense: Tile[] = [];
+    for (let t = 0, i = 0; i < 2000; i += 1) {
+      t += [0, 1, 2, 9, 40, 90, 150, 300, 430, 540, 541, 900][Math.floor(random() * 12)] ?? 0;
+      const last = dense.at(-1);
+      const lane = Math.floor(random() * 4);
+      if (last?.t === t && last.lane === lane) continue;
+      dense.push(at(t, lane, random() < 0.2 ? Math.floor(random() * 2000) : undefined));
+    }
+    const charts: [string, Tile[]][] = [['dense', dense]];
+    for (const [path, chart] of Object.entries(shipped)) {
+      for (const [name, difficulty] of Object.entries(chart.difficulties)) {
+        charts.push([`${path.split('/').at(-1)} ${name}`, difficulty.tiles]);
+      }
+    }
+    const frames = [
+      DEFAULT_TILES_FRAME,
+      { exitAlong: 0.28, widthPx: 844, heightPx: 390 },
+      { exitAlong: 0.28, widthPx: 1180, heightPx: 820 },
+    ];
+
+    it.each(charts)('%s', (_, tiles) => {
+      expect(tiles.length).toBeGreaterThan(0);
+      for (const frame of frames) {
+        for (const size of ['normal', 'big'] as const) {
+          for (const windowMs of [1000, 1600 * 1.5]) {
+            const sizing = tileSizing(size, frame);
+            const all = tileSpans(tiles, windowMs, sizing);
+            tiles.forEach((_, i) => {
+              expect(tileSpan(tiles, i, windowMs, sizing), `tile ${i}`).toBe(all[i]);
+            });
+          }
+        }
+      }
+    });
   });
 
   it('keeps every tile of a dense passage in its lane, and every tile visible from the floor', () => {

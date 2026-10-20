@@ -140,7 +140,7 @@ function spanOf(
  * How tall tile `index` is drawn, in chart ms from its bottom edge (at its time) to
  * its top. The drawing and the hit test both use it, so a tile is pressable exactly
  * where it is drawn, and drawn (red once lost, translucent once cleared) until its
- * top has left the screen.
+ * top has left the screen. Equal to `tileSpans(...)[index]`.
  */
 export function tileSpan(
   tiles: readonly Tile[],
@@ -160,13 +160,10 @@ export function tileSpan(
       nextInLane = other.t;
       break;
     }
-    // Tiles are sorted by time: past the base, nothing further can shorten this one.
-    if (
-      nextStart !== Infinity &&
-      other.t - tile.t > Math.max(sizing.base * windowMs, tile.dur ?? 0)
-    ) {
-      break;
-    }
+    // Tiles are sorted by time: past the tallest it can be (and a seam beyond, the
+    // same-lane cap's), nothing further can shorten this one.
+    const tallest = Math.max(sizing.base * windowMs, sizing.floor * windowMs, tile.dur ?? 0);
+    if (nextStart !== Infinity && other.t - tile.t > tallest + sizing.seam * windowMs) break;
   }
   return spanOf(tile, nextStart, nextInLane, windowMs, sizing);
 }
