@@ -6,6 +6,7 @@ import type { Credits } from '../credits/schema';
 import type {
   CountdownInfo,
   FinalResults,
+  GameMode,
   GameSession,
   LoadingInfo,
   PauseInfo,
@@ -113,6 +114,7 @@ class FakeSession implements GameSession {
 
 const RESULTS: FinalResults = {
   outcome: 'cleared',
+  mode: 'rhythm',
   songId: 'gentle',
   songTitle: 'Gentle Song',
   difficulty: 'normal',
@@ -220,10 +222,12 @@ function setup({
   storage = memoryStorage(),
   online = true,
   audioRunning = true,
+  modes,
 }: {
   storage?: ReturnType<typeof memoryStorage>;
   online?: boolean;
   audioRunning?: boolean;
+  modes?: readonly GameMode[];
 } = {}) {
   const session = new FakeSession();
   const store: SaveStore = createSaveStore({ storage: () => storage });
@@ -257,6 +261,7 @@ function setup({
     session,
     store,
     songs: SONGS,
+    ...(modes ? { modes } : {}),
     credits: CREDITS,
     charts,
     setVolume,
@@ -316,8 +321,9 @@ const touchTap = (node: HTMLElement, { click = node }: { click?: HTMLElement } =
 const nextPress = () => {
   document.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch' }));
 };
-const toSongs = (session: FakeSession) => {
-  tap(q('.home-tile'));
+const card = (mode: GameMode) => q(`.mode-card[data-mode="${mode}"]`);
+const toSongs = (session: FakeSession, mode: GameMode = 'rhythm') => {
+  tap(card(mode));
   session.ready();
 };
 
@@ -340,7 +346,7 @@ describe('menus', () => {
   it('goes from Home to the songs with a tap, Enter or Space', () => {
     for (const how of ['tap', 'Enter', ' '] as const) {
       const { session } = setup();
-      if (how === 'tap') tap(q('.home-tile'));
+      if (how === 'tap') tap(card('rhythm'));
       else key(how);
       expect(menus?.view).toBe('songs');
       expect(session.loads).toHaveLength(1);
@@ -395,7 +401,7 @@ describe('menus', () => {
 
   it('shows loading on the Play tile, and starts only once ready, inside the tap', () => {
     const { session } = setup();
-    tap(q('.home-tile'));
+    tap(card('rhythm'));
     const play = q('.play-tile');
     expect(play.textContent).toBe('Loading');
     expect(play.getAttribute('aria-disabled')).toBe('true');
@@ -467,9 +473,9 @@ describe('menus', () => {
 
   it("never lets a touch's click land on the screen its command opened", () => {
     const { session, store } = setup();
-    // Home's Tap to play opens the songs: the click lands on a song row.
+    // Home's game card opens the songs: the click lands on a song row.
     session.ready();
-    touchTap(q('.home-tile'), { click: q('.home-tile') });
+    touchTap(card('rhythm'), { click: card('rhythm') });
     expect(menus?.view).toBe('songs');
     // Song select is built once: the same row is back under the finger after Quit.
     const busy = q('.song-input[value="busy"]') as HTMLInputElement;
@@ -530,7 +536,7 @@ describe('menus', () => {
     expect(q('.result-score').textContent).toBe('4,200');
     expect(q('.result-badge').textContent).toBe('New best!');
     expect(document.activeElement?.textContent).toBe('Retry');
-    expect(store.best('gentle', 'normal', 1)?.score).toBe(4200);
+    expect(store.best('rhythm', 'gentle', 'normal', 1)?.score).toBe(4200);
 
     tap(buttonNamed('Retry'));
     expect(session.calls.at(-1)).toBe('restart');
@@ -558,7 +564,7 @@ describe('menus', () => {
 
   it('offers a way out of a song that did not download: try again, or pick another', () => {
     const { session, fetched } = setup({ online: false });
-    tap(q('.home-tile'));
+    tap(card('rhythm'));
     session.error = "This song didn't load.";
     session.set('error');
     const play = q('.play-tile');
@@ -934,6 +940,211 @@ describe('menus', () => {
       toSongs(session);
       tap(buttonNamed('Settings'));
       expect(q('.settings-muted').hidden).toBe(true);
+    });
+  });
+
+  describe('the two games', () => {
+    const BOTH: readonly GameMode[] = ['rhythm', 'tiles'];
+    const badge = () => q('.screen--songs .mode-badge').textContent;
+    const intro = () => root.querySelector<HTMLElement>('.game-sheet--intro');
+    const started = (session: FakeSession) => session.calls.filter((call) => call === 'start');
+
+    it('shows Rhythm alone without ?debug, and plays a saved Tiles choice as Rhythm', () => {
+      const storage = memoryStorage();
+      setup({ storage }).store.updateSettings({ gameMode: 'tiles' });
+      menus?.dispose();
+      root.replaceChildren();
+      const { session } = setup({ storage });
+      expect(
+        [...root.querySelectorAll('.mode-card')].map((n) => n.getAttribute('aria-label')),
+      ).toEqual(['Play Rhythm']);
+      expect(q('.mode-cards').dataset.count).toBe('1');
+      expect(session.loads[0]?.mode).toBe('rhythm');
+      key('Enter');
+      expect(badge()).toBe('Rhythm');
+      tap(buttonNamed('Settings'));
+      expect(root.querySelectorAll('.choice--games input')).toHaveLength(1);
+    });
+
+    it('offers both games as cards, each with a preview and a line about it', () => {
+      setup({ modes: BOTH });
+      const cards = [...root.querySelectorAll<HTMLElement>('.mode-card')];
+      expect(cards.map((n) => n.getAttribute('aria-label'))).toEqual(['Play Rhythm', 'Play Tiles']);
+      expect(cards.every((n) => n.querySelector('.preview[aria-hidden="true"]'))).toBe(true);
+      const line = document.getElementById(card('tiles').getAttribute('aria-describedby') ?? '');
+      expect(line?.textContent).toBe(
+        "Tap every tile before it falls off the screen. Timing doesn't matter.",
+      );
+      expect(document.activeElement).toBe(card('rhythm'));
+    });
+
+    it('opens the songs of the game a card picks, once per touch, and loads that game', () => {
+      const { session, store } = setup({ modes: BOTH });
+      touchTap(card('tiles'));
+      expect(menus?.view).toBe('songs');
+      expect(store.settings.gameMode).toBe('tiles');
+      expect(badge()).toBe('Tiles');
+      expect(q('.screen--songs').dataset.mode).toBe('tiles');
+      expect(session.loads.map((load) => load.mode)).toEqual(['rhythm', 'tiles']);
+      nextPress();
+    });
+
+    it('goes back to Home from Change game, on the picked card; Enter opens that game', () => {
+      const { session } = setup({ modes: BOTH });
+      toSongs(session, 'tiles');
+      tap(buttonNamed('Change game'));
+      expect(menus?.view).toBe('home');
+      expect(document.activeElement).toBe(card('tiles'));
+      key('Enter', document.body);
+      expect(menus?.view).toBe('songs');
+      expect(badge()).toBe('Tiles');
+    });
+
+    it('shows and changes the same choice in Settings, and remembers it after a relaunch', () => {
+      const storage = memoryStorage();
+      const { session, store } = setup({ storage, modes: BOTH });
+      toSongs(session);
+      tap(buttonNamed('Settings'));
+      const checked = () =>
+        q('.choice--games input:checked').getAttribute('value') as GameMode | null;
+      expect(checked()).toBe('rhythm');
+      expect(q('.screen--settings').textContent).toContain('The first missed note ends the song.');
+      q('.choice--games input[value="tiles"]').click();
+      expect(store.settings.gameMode).toBe('tiles');
+      expect(session.loads.at(-1)?.mode).toBe('tiles');
+      expect(q('.screen--settings').textContent).toContain(
+        'A tile that falls off, or a tap on empty space, ends the song.',
+      );
+      q('.screen--settings input[value="relaxed"]').click();
+      expect(q('.screen--settings').textContent).toContain(
+        'A tile that falls off breaks your combo, and the song plays on.',
+      );
+      key('Escape');
+      expect(badge()).toBe('Tiles');
+      menus?.dispose();
+      root.replaceChildren();
+
+      setup({ storage, modes: BOTH });
+      expect(document.activeElement).toBe(card('tiles'));
+      key('Enter');
+      expect(badge()).toBe('Tiles');
+    });
+
+    it('keeps the bests of each game apart, and says New best! within the game', () => {
+      const storage = memoryStorage();
+      setup({ storage, modes: BOTH }).store.recordResults({ ...RESULTS, score: 4200 });
+      menus?.dispose();
+      root.replaceChildren();
+      const { session } = setup({ storage, modes: BOTH });
+      toSongs(session, 'tiles');
+      expect(root.querySelector('.song-best-score')).toBeNull();
+      session.finish({ mode: 'tiles', score: 100 });
+      expect(q('.result-badge').textContent).toBe('New best!');
+      expect(q('.game-sheet--results .mode-badge').textContent).toBe('Tiles');
+      tap(buttonNamed('Song list'));
+      expect(q('.song-best-score').textContent).toBe('100');
+      tap(buttonNamed('Change game'));
+      tap(card('rhythm'));
+      expect(q('.song-best-score').textContent).toBe('4,200');
+    });
+
+    it('names the game on the pause screen', () => {
+      const { session } = setup({ modes: BOTH });
+      toSongs(session, 'tiles');
+      session.config = { ...(session.loads.at(-1) as SessionConfig) };
+      tap(q('.play-tile'));
+      tap(buttonNamed('Got it'));
+      session.set('playing');
+      session.pause();
+      expect(q('.game-sheet .mode-badge').textContent).toBe('Tiles');
+    });
+
+    describe('How to play', () => {
+      it('comes before the first Tiles run, and Got it starts the song inside its tap', () => {
+        const { session, store } = setup({ modes: BOTH });
+        toSongs(session, 'tiles');
+        tap(q('.play-tile'));
+        expect(started(session)).toEqual([]);
+        expect(intro()?.getAttribute('role')).toBe('dialog');
+        expect(
+          [...(intro()?.querySelectorAll('.intro-step') ?? [])].map((n) => n.textContent),
+        ).toEqual([
+          'Tap any black tile, anywhere on it.',
+          'Hold long tiles until they fill up.',
+          "Don't let a tile fall off, and don't tap the water.",
+        ]);
+        expect(intro()?.querySelector('.preview--tiles')).not.toBeNull();
+        expect(q('.screen--songs').inert).toBe(true);
+        expect(document.activeElement?.textContent).toBe('Got it');
+        // Enter behind it starts nothing.
+        key('Enter');
+        expect(started(session)).toEqual([]);
+
+        touchTap(buttonNamed('Got it'));
+        expect(started(session)).toEqual(['start']);
+        expect(intro()).toBeNull();
+        expect(store.settings.seenIntro).toEqual({ rhythm: false, tiles: true });
+
+        session.quit();
+        nextPress();
+        tap(q('.play-tile'));
+        expect(intro()).toBeNull();
+        expect(started(session)).toEqual(['start', 'start']);
+      });
+
+      it('closes on Escape before the first run, starting nothing, and asks again next time', () => {
+        const { session, store } = setup({ modes: BOTH });
+        toSongs(session, 'tiles');
+        tap(q('.play-tile'));
+        key('Escape');
+        expect(intro()).toBeNull();
+        expect(menus?.view).toBe('songs');
+        expect(started(session)).toEqual([]);
+        expect(document.activeElement).toBe(q('.play-tile'));
+        expect(store.settings.seenIntro.tiles).toBe(false);
+        tap(q('.play-tile'));
+        expect(intro()).not.toBeNull();
+      });
+
+      it('never comes before a Rhythm run', () => {
+        const { session } = setup({ modes: BOTH });
+        toSongs(session);
+        tap(q('.play-tile'));
+        expect(intro()).toBeNull();
+        expect(started(session)).toEqual(['start']);
+      });
+
+      it('reopens from song select for either game, and gives focus back to its button', () => {
+        const { session } = setup({ modes: BOTH });
+        toSongs(session);
+        tap(buttonNamed('How to play'));
+        expect(intro()?.querySelector('.mode-badge')?.textContent).toBe('Rhythm');
+        expect(intro()?.querySelectorAll('.intro-step')).toHaveLength(3);
+        tap(buttonNamed('Got it'));
+        expect(intro()).toBeNull();
+        expect(started(session)).toEqual([]);
+        expect(document.activeElement?.textContent).toBe('How to play');
+
+        tap(buttonNamed('Change game'));
+        tap(card('tiles'));
+        tap(buttonNamed('How to play'));
+        expect(intro()?.querySelector('.mode-badge')?.textContent).toBe('Tiles');
+        key('Escape');
+        expect(intro()).toBeNull();
+        expect(menus?.view).toBe('songs');
+        expect(document.activeElement?.textContent).toBe('How to play');
+      });
+
+      it('is gone when the song list is', () => {
+        const { session } = setup({ modes: BOTH });
+        toSongs(session);
+        tap(buttonNamed('How to play'));
+        session.set('starting');
+        expect(intro()).toBeNull();
+        session.set('ready');
+        expect(menus?.view).toBe('songs');
+        expect(q('.screen--songs').inert).toBe(false);
+      });
     });
   });
 });

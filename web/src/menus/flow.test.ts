@@ -8,7 +8,9 @@ import {
   formatTempo,
   isModal,
   nearestScrollSpeed,
+  offeredGameModes,
   playButtonFor,
+  resolveGameMode,
   resolveSelection,
   SCROLL_SPEEDS,
   setupKey,
@@ -187,11 +189,33 @@ describe('setupKey', () => {
   it('changes with anything that needs a new load()', () => {
     const settings = { ...DEFAULT_SETTINGS };
     const selection = { songId: 'a', difficulty: 'easy' as const, tempo: 1 as const };
-    const key = setupKey(selection, settings);
-    expect(setupKey({ ...selection }, { ...settings, masterVolume: 0.2 })).toBe(key);
-    expect(setupKey({ ...selection, tempo: 1.5 }, settings)).not.toBe(key);
-    expect(setupKey(selection, { ...settings, failMode: 'relaxed' })).not.toBe(key);
-    expect(setupKey(selection, { ...settings, scrollDurationMs: 900 })).not.toBe(key);
+    const key = setupKey(selection, settings, 'rhythm');
+    expect(setupKey({ ...selection }, { ...settings, masterVolume: 0.2 }, 'rhythm')).toBe(key);
+    expect(setupKey({ ...selection, tempo: 1.5 }, settings, 'rhythm')).not.toBe(key);
+    expect(setupKey(selection, { ...settings, failMode: 'relaxed' }, 'rhythm')).not.toBe(key);
+    expect(setupKey(selection, { ...settings, scrollDurationMs: 900 }, 'rhythm')).not.toBe(key);
+    expect(setupKey(selection, settings, 'tiles')).not.toBe(key);
+  });
+
+  it('includes the game played, which may differ from the saved one', () => {
+    const settings = { ...DEFAULT_SETTINGS, gameMode: 'tiles' as const };
+    const selection = { songId: 'a', difficulty: 'easy' as const, tempo: 1 as const };
+    expect(setupKey(selection, settings, 'rhythm')).toBe(
+      setupKey(selection, { ...settings, gameMode: 'rhythm' }, 'rhythm'),
+    );
+  });
+});
+
+describe('the Tiles gate', () => {
+  it('offers Tiles only with ?debug', () => {
+    expect(offeredGameModes(false)).toEqual(['rhythm']);
+    expect(offeredGameModes(true)).toEqual(['rhythm', 'tiles']);
+  });
+
+  it('plays a saved Tiles choice as Rhythm while Tiles is not offered', () => {
+    expect(resolveGameMode('tiles', ['rhythm'])).toBe('rhythm');
+    expect(resolveGameMode('tiles', ['rhythm', 'tiles'])).toBe('tiles');
+    expect(resolveGameMode('rhythm', ['rhythm', 'tiles'])).toBe('rhythm');
   });
 });
 

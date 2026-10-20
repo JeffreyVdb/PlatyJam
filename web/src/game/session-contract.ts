@@ -10,6 +10,14 @@ import type { Chart, DifficultyName } from '../chart/schema';
  * through the commands below and reads only the outputs below.
  */
 
+/**
+ * The two games. `rhythm`: hit each tile on the line, in time. `tiles`: tap every tile
+ * before it falls off; timing doesn't matter. Tiles has no rules of its own yet
+ * (PLA-14): a session loaded with it plays Rhythm.
+ */
+export const GAME_MODES = ['rhythm', 'tiles'] as const;
+export type GameMode = (typeof GAME_MODES)[number];
+
 /** Tempos the game offers. Chart time runs this many ms per real ms. */
 export const TEMPOS = [0.75, 1, 1.25, 1.5] as const;
 export type Tempo = (typeof TEMPOS)[number];
@@ -30,6 +38,7 @@ export const MAX_SCROLL_DURATION_MS = 4000;
 export interface SessionSetup {
   /** The chart, or the download that delivers it (the session waits in `loading`). */
   chart: Chart | Promise<Chart>;
+  mode: GameMode;
   difficulty: DifficultyName;
   tempo: Tempo;
   failMode: FailMode;
@@ -185,6 +194,8 @@ export interface FinalResults extends ScoreStats {
   outcome: Outcome;
   /** Set when `outcome` is `failed`. */
   failure?: Failure;
+  /** The game that was played: best scores are kept per game. */
+  mode: GameMode;
   songId: string;
   songTitle: string;
   difficulty: DifficultyName;

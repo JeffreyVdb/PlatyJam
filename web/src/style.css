@@ -27,6 +27,13 @@
   --sunk: rgb(3 14 22 / 38%);
   /* The menus' veil over the stage: the lanes still show through. */
   --veil: rgb(13 43 62 / 88%);
+  /*
+   * The two games' accents (PLA-13), on their cards, badges, pause and results, and
+   * on the stage. Rhythm's is the hit line's ripple; Tiles' a water lily. Both read
+   * at AA as text on --river and darker, and under --river-deep text.
+   */
+  --game-rhythm: var(--ripple);
+  --game-tiles: #f7a8d8;
 
   --font: 'Shantell Sans', ui-rounded, 'SF Pro Rounded', system-ui, sans-serif;
   --edge: 16px;
@@ -1309,19 +1316,29 @@ body {
   }
 }
 
-/* -- Home: the wordmark, and the first tile resting on the hit line -- */
+/* -- Home: the wordmark, and a card per game -- */
+
+/* Whatever names a game takes its accent. */
+[data-mode='rhythm'] {
+  --accent: var(--game-rhythm);
+}
+
+[data-mode='tiles'] {
+  --accent: var(--game-tiles);
+}
 
 .hud > .screen--home {
   align-items: center;
-  padding-top: calc(env(safe-area-inset-top) + clamp(28px, 11vh, 120px));
+  padding-top: calc(env(safe-area-inset-top) + clamp(24px, 9vh, 104px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: linear-gradient(
     to bottom,
     rgb(13 43 62 / 92%),
-    rgb(13 43 62 / 55%) var(--hit-line-y, 74%),
-    rgb(13 43 62 / 80%)
+    rgb(13 43 62 / 62%) var(--hit-line-y, 74%),
+    rgb(13 43 62 / 85%)
   );
   text-align: center;
-  cursor: pointer;
 }
 
 .home-title {
@@ -1348,70 +1365,12 @@ body {
 
 .home-tagline {
   max-width: 28ch;
-  margin: 18px 0 0;
+  margin: 14px 0 0;
   font-size: clamp(1.0625rem, 2.6vmin, 1.375rem);
   font-weight: 450;
   line-height: 1.4;
   color: var(--foam-soft);
   text-wrap: balance;
-}
-
-.home-tile {
-  position: fixed;
-  left: 50%;
-  top: var(--hit-line-y, 74%);
-  width: min(17rem, 72vw);
-  min-height: 92px;
-  border: 0;
-  border-radius: var(--radius-card);
-  background: var(--bill);
-  color: var(--river-deep);
-  font: inherit;
-  font-size: 1.75rem;
-  font-weight: 780;
-  letter-spacing: -0.01em;
-  cursor: pointer;
-  touch-action: manipulation;
-  transform: translate(-50%, -50%);
-  box-shadow:
-    inset 0 -6px 0 var(--bill-pressed),
-    0 10px 28px rgb(3 14 22 / 50%);
-  transition:
-    transform 120ms ease-out,
-    box-shadow 120ms ease-out;
-}
-
-/* Ripples spreading from the tile: the screen's one moving part. */
-.home-tile::before,
-.home-tile::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  box-shadow: 0 0 0 2px var(--ripple);
-  opacity: 0;
-  animation: tile-ripple 2.6s var(--ease-out) 1s infinite;
-  pointer-events: none;
-}
-
-.home-tile::after {
-  animation-delay: 2.3s;
-}
-
-.home-tile:hover {
-  background: var(--bill-hover);
-}
-
-.screen--home:active .home-tile {
-  transform: translate(-50%, calc(-50% + 3px));
-  box-shadow:
-    inset 0 -2px 0 var(--bill-pressed),
-    0 6px 16px rgb(3 14 22 / 45%);
-}
-
-.home-tile:focus-visible {
-  outline: 3px solid var(--ripple);
-  outline-offset: 5px;
 }
 
 @keyframes letter-land {
@@ -1421,15 +1380,504 @@ body {
   }
 }
 
-@keyframes tile-ripple {
-  0% {
-    opacity: 0.7;
-    transform: scale(1);
+/*
+ * The cards, each with its preview beside the words: stacked in portrait, side by
+ * side in landscape. One card alone sits in the middle.
+ */
+.mode-cards {
+  display: grid;
+  gap: 16px;
+  width: min(36rem, 100%);
+  /* Centred in the room below the title, and never closer to it than the gap above. */
+  margin: auto;
+  padding: clamp(24px, 6vh, 56px) 0 clamp(8px, 4vh, 40px);
+}
+
+.mode-card {
+  --preview-width: clamp(6.5rem, 22vw, 9rem);
+  display: grid;
+  grid-template-columns: var(--preview-width) minmax(0, 1fr);
+  gap: 18px;
+  align-items: stretch;
+  min-height: 44px;
+  padding: 14px;
+  border: 0;
+  border-radius: var(--radius-card);
+  background: var(--river);
+  color: var(--foam);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+  box-shadow: var(--shadow-card);
+  transition:
+    background-color 120ms ease-out,
+    transform 120ms ease-out;
+}
+
+.mode-card:hover {
+  background: var(--river-raised);
+}
+
+.mode-card:active {
+  transform: translateY(3px);
+}
+
+.mode-card:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 4px;
+}
+
+.mode-card-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 2px 2px 0;
+}
+
+.mode-card-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--accent);
+  font-size: 1.75rem;
+  font-weight: 780;
+  letter-spacing: -0.015em;
+  line-height: 1.1;
+}
+
+.mode-card-name .line-icon {
+  width: 30px;
+  height: 30px;
+  stroke-width: 2;
+}
+
+.mode-card-line {
+  max-width: 34ch;
+  font-size: 1.0625rem;
+  line-height: 1.4;
+  color: var(--foam-soft);
+  text-wrap: pretty;
+}
+
+/* The yellow tile that played the song on Home before: the card's call to play. */
+.mode-card-play {
+  margin-top: auto;
+  min-width: 7.5rem;
+  padding: 10px 22px 12px;
+  border-radius: var(--radius-control);
+  background: var(--bill);
+  color: var(--river-deep);
+  font-size: 1.25rem;
+  font-weight: 780;
+  text-align: center;
+  box-shadow: inset 0 -4px 0 var(--bill-pressed);
+}
+
+.mode-card:hover .mode-card-play {
+  background: var(--bill-hover);
+}
+
+@media (min-aspect-ratio: 5/4) {
+  .mode-cards[data-count='2'] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: min(60rem, 100%);
   }
+}
+
+/* Short windows (a phone on its side): a smaller title and smaller cards. */
+@media (max-height: 34rem) {
+  .hud > .screen--home {
+    padding-top: calc(env(safe-area-inset-top) + 12px);
+  }
+
+  .home-title {
+    font-size: clamp(2.5rem, 12vmin, 3.5rem);
+  }
+
+  .mode-cards {
+    padding-top: 16px;
+  }
+
+  .mode-card {
+    --preview-width: 5.5rem;
+    gap: 14px;
+    padding: 10px;
+  }
+
+  .mode-card-name {
+    font-size: 1.375rem;
+  }
+
+  .mode-card-line {
+    font-size: 0.9375rem;
+  }
+
+  .mode-card-play {
+    padding: 8px 18px 10px;
+    font-size: 1.125rem;
+  }
+}
+
+/* -- A game's badge: its icon and name in its accent -- */
+
+.mode-badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px 0 8px;
+  border-radius: 16px;
+  background: var(--sunk);
+  color: var(--accent);
+  font-size: 1rem;
+  font-weight: 720;
+  line-height: 1;
+}
+
+.mode-badge .line-icon {
+  width: 20px;
+  height: 20px;
+}
+
+/*
+ * -- Previews: four lanes, falling tiles and a finger, one loop per game --
+ *
+ * Each drop is a lane-tall box that slides down (percentages of its own height), so
+ * a tile at its top falls the length of the lane. Its delay is a fraction of the
+ * loop, run ahead: the drops start mid-fall, already staggered. Only transform and
+ * opacity move.
+ */
+.preview {
+  --loop: 2.4s;
+  --tile: 20%;
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  border-radius: var(--radius-control);
+  background: var(--river-deep);
+  box-shadow: inset 0 0 0 1px var(--line);
+  contain: paint;
+}
+
+.preview-lane + .preview-lane {
+  border-left: 1px solid var(--line);
+}
+
+.preview-drop {
+  position: absolute;
+  top: 0;
+  left: calc(var(--lane) * 25%);
+  width: 25%;
+  height: 100%;
+  animation: preview-fall-to-line var(--loop) linear calc(var(--delay) * var(--loop) * -1) infinite;
+}
+
+.preview-drop > * {
+  animation-duration: var(--loop);
+  animation-delay: calc(var(--delay) * var(--loop) * -1);
+  animation-iteration-count: infinite;
+}
+
+.preview-tile {
+  position: absolute;
+  top: 0;
+  left: 12%;
+  right: 12%;
+  height: var(--tile);
+  border-radius: 4px;
+  background: var(--bill);
+  box-shadow: inset 0 -3px 0 var(--bill-pressed);
+  transform-origin: 50% 100%;
+}
+
+.preview-finger {
+  position: absolute;
+  top: calc(var(--tile) * 0.5);
+  left: 50%;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  border-radius: 50%;
+  background: var(--foam);
+  box-shadow: 0 2px 6px rgb(3 14 22 / 55%);
+  opacity: 0;
+}
+
+/* Rhythm: tiles fall to the glowing line, and the finger hits them on it. */
+.preview--rhythm .preview-drop {
+  animation-name: preview-fall-to-line;
+}
+
+.preview-line {
+  position: absolute;
+  top: 80%;
+  right: 0;
+  left: 0;
+  height: 2px;
+  margin-top: -1px;
+  background: var(--game-rhythm);
+  box-shadow: 0 0 10px var(--game-rhythm);
+}
+
+.preview--rhythm .preview-tile {
+  animation-name: preview-hit;
+  animation-timing-function: ease-out;
+}
+
+.preview--rhythm .preview-finger {
+  top: calc(var(--tile) * 0.75);
+  animation-name: preview-press-line;
+}
+
+.preview-flash {
+  position: absolute;
+  top: var(--tile);
+  right: 4%;
+  left: 4%;
+  height: 8px;
+  margin-top: -4px;
+  border-radius: 4px;
+  background: var(--game-rhythm);
+  box-shadow: 0 0 14px var(--game-rhythm);
+  opacity: 0;
+  animation-name: preview-flash;
+}
+
+@keyframes preview-fall-to-line {
+  0% {
+    transform: translateY(calc(var(--tile) * -1));
+  }
+  70%,
+  100% {
+    transform: translateY(calc(80% - var(--tile)));
+  }
+}
+
+@keyframes preview-hit {
+  0%,
+  70% {
+    opacity: 1;
+    transform: none;
+  }
+  82%,
   100% {
     opacity: 0;
-    transform: scale(1.18, 1.5);
+    transform: scale(1.3, 0.5);
   }
+}
+
+@keyframes preview-press-line {
+  0%,
+  60% {
+    opacity: 0;
+    transform: translateY(-10px) scale(1.4);
+  }
+  70%,
+  82% {
+    opacity: 0.95;
+    transform: none;
+  }
+  94%,
+  100% {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes preview-flash {
+  0%,
+  69% {
+    opacity: 0;
+    transform: scaleX(0.6);
+  }
+  73% {
+    opacity: 1;
+    transform: none;
+  }
+  92%,
+  100% {
+    opacity: 0;
+    transform: scaleX(1.25);
+  }
+}
+
+/* Tiles: black tiles over the water, tapped anywhere; the long one fills up. */
+.preview--tiles {
+  --loop: 3.2s;
+  --tile: 24%;
+  background: var(--river-raised);
+}
+
+.preview--tiles .preview-drop {
+  animation-name: preview-fall-through;
+}
+
+.preview--tiles .preview-drop--hold {
+  --tile: 46%;
+}
+
+.preview--tiles .preview-tile {
+  overflow: hidden;
+  background: var(--river-deep);
+  box-shadow: inset 0 0 0 1px rgb(3 14 22 / 60%);
+  transform-origin: 50% 50%;
+}
+
+.preview-fill {
+  position: absolute;
+  inset: 0;
+  background: var(--game-tiles);
+  transform: scaleY(0);
+  transform-origin: 50% 100%;
+  animation: inherit;
+  animation-name: preview-fill;
+  animation-timing-function: linear;
+}
+
+.preview-drop--high .preview-tile {
+  animation-name: preview-pop-high;
+}
+
+.preview-drop--high .preview-finger {
+  animation-name: preview-press-high;
+}
+
+.preview-drop--low .preview-tile {
+  animation-name: preview-pop-low;
+}
+
+.preview-drop--low .preview-finger {
+  animation-name: preview-press-low;
+}
+
+.preview-drop--hold .preview-tile {
+  animation-name: preview-pop-hold;
+}
+
+.preview-drop--hold .preview-finger {
+  top: calc(var(--tile) * 0.8);
+  animation-name: preview-press-hold;
+}
+
+@keyframes preview-fall-through {
+  from {
+    transform: translateY(calc(var(--tile) * -1));
+  }
+  to {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes preview-pop-high {
+  0%,
+  30% {
+    opacity: 1;
+    transform: none;
+  }
+  38%,
+  100% {
+    opacity: 0;
+    transform: scale(1.3);
+  }
+}
+
+@keyframes preview-press-high {
+  0%,
+  22% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+  29%,
+  34% {
+    opacity: 0.95;
+    transform: none;
+  }
+  42%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes preview-pop-low {
+  0%,
+  62% {
+    opacity: 1;
+    transform: none;
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(1.3);
+  }
+}
+
+@keyframes preview-press-low {
+  0%,
+  54% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+  61%,
+  66% {
+    opacity: 0.95;
+    transform: none;
+  }
+  74%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes preview-pop-hold {
+  0%,
+  60% {
+    opacity: 1;
+    transform: none;
+  }
+  68%,
+  100% {
+    opacity: 0;
+    transform: scale(1.15);
+  }
+}
+
+@keyframes preview-press-hold {
+  0%,
+  18% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+  25%,
+  60% {
+    opacity: 0.95;
+    transform: none;
+  }
+  68%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes preview-fill {
+  0%,
+  25% {
+    transform: scaleY(0);
+  }
+  58%,
+  100% {
+    transform: scaleY(1);
+  }
+}
+
+/* Off screen, in a hidden page, and under reduced motion (below): a still frame. */
+.preview.is-offscreen *,
+.is-page-hidden .preview * {
+  animation-play-state: paused;
 }
 
 /* -- Segmented choices: native radios behind tile-like faces -- */
@@ -2043,10 +2491,9 @@ body {
     animation: none;
   }
 
-  .home-tile::before,
-  .home-tile::after {
-    animation: none;
-    opacity: 0;
+  /* The previews hold one frame, mid-game: tiles falling, one being played. */
+  .preview * {
+    animation-play-state: paused;
   }
 
   .play-star {
@@ -2095,4 +2542,149 @@ body {
 
 .game-card-title:focus-visible {
   outline: none;
+}
+
+/* ---- The two games (PLA-13): song select, settings, How to play ---- */
+
+/* Song select names the game beside its title, and offers to change it. */
+.screen--songs .screen-title {
+  flex: none;
+}
+
+.songs-game {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.screen--songs .screen-actions {
+  margin-left: auto;
+}
+
+/* Narrower windows: the game and Change game get a row of their own, under the bar. */
+@media (max-width: 64rem) {
+  .screen--songs .screen-bar {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
+  .songs-game {
+    order: 1;
+    flex: 1 0 100%;
+  }
+}
+
+/* Settings: each game a tall option, with its preview and what it is. */
+.choice--games .choice-face {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  column-gap: 14px;
+  row-gap: 4px;
+  align-items: start;
+  justify-items: start;
+  padding: 10px;
+  text-align: left;
+  white-space: normal;
+}
+
+.choice--games .preview {
+  grid-row: span 2;
+  width: 100%;
+}
+
+.choice--games .choice-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+  color: var(--accent);
+  font-size: 1.125rem;
+  font-weight: 760;
+}
+
+.choice--games .choice-label .line-icon {
+  width: 22px;
+  height: 22px;
+}
+
+.choice-text {
+  font-size: 0.9375rem;
+  font-weight: 450;
+  line-height: 1.4;
+  color: var(--foam-soft);
+  text-wrap: pretty;
+}
+
+/* Checked: the option lifts out of the water, ringed in its accent. */
+.choice--games .choice-input:checked + .choice-face {
+  background: var(--river-raised);
+  box-shadow: inset 0 0 0 2px var(--accent);
+  color: var(--foam);
+}
+
+.choice--games .choice-option:only-child .choice-face {
+  cursor: default;
+}
+
+@media (max-width: 34rem) {
+  .choice--games .choice-track {
+    flex-direction: column;
+  }
+}
+
+/* Pause, results and How to play name the game under their title. */
+.game-card-mode {
+  margin: 0 0 14px;
+}
+
+.game-card--intro {
+  width: min(28rem, 100%);
+}
+
+.intro-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  margin: 0 0 18px;
+}
+
+.intro-preview {
+  width: min(9rem, 40%);
+}
+
+.intro-steps {
+  align-self: stretch;
+  margin: 0;
+  padding-left: 1.35em;
+  font-size: 1.0625rem;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.intro-step + .intro-step {
+  margin-top: 8px;
+}
+
+.intro-step::marker {
+  color: var(--accent);
+  font-weight: 760;
+}
+
+/* Short windows: the preview stands beside the steps, so Got it stays in view. */
+@media (max-height: 34rem) {
+  .game-card--intro {
+    width: min(36rem, 100%);
+  }
+
+  .intro-body {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
+  .intro-preview {
+    flex: none;
+    width: 5.5rem;
+  }
 }

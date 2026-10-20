@@ -1,9 +1,16 @@
-import type { FinalResults, GameSession, PauseInfo, SessionConfig } from '../game/session-contract';
+import type {
+  FinalResults,
+  GameMode,
+  GameSession,
+  PauseInfo,
+  SessionConfig,
+} from '../game/session-contract';
 import { starIcon } from '../hud/icons';
 import { prefersReducedMotion } from '../hud/motion';
 import type { RecordedResults } from '../save/save-store';
 import { el, gestureButton, uid, visuallyHidden } from './controls';
 import { formatTempo } from './flow';
+import { gameBadge } from './games';
 import type { Screen } from './screens';
 import { DIFFICULTY_NAMES } from './song-select';
 
@@ -42,6 +49,19 @@ function laneList(lanes: readonly number[]): string {
 
 const lanesWord = (lanes: readonly number[]) => (lanes.length > 1 ? 'lanes' : 'lane');
 
+/** The line under a sheet's title that names the game being played. */
+function gameLine(): { node: HTMLElement; show(mode: GameMode): void } {
+  const node = el('p', 'game-card-mode');
+  return {
+    node,
+    show(mode) {
+      const current = node.firstElementChild;
+      if (current instanceof HTMLElement && current.dataset.mode === mode) return;
+      node.replaceChildren(gameBadge(mode));
+    },
+  };
+}
+
 export function sheet(className: string): {
   node: HTMLElement;
   card: HTMLElement;
@@ -69,6 +89,7 @@ export interface PauseScreen extends Screen {
 export function createPauseScreen(session: GameSession, onQuit: () => void): PauseScreen {
   const { node, card, title } = sheet('');
   title.textContent = 'Paused';
+  const game = gameLine();
   const hint = el('p', 'game-card-text');
   const alert = el('p', 'game-card-alert');
   alert.setAttribute('role', 'status');
@@ -83,7 +104,7 @@ export function createPauseScreen(session: GameSession, onQuit: () => void): Pau
     }),
     gestureButton('Quit', 'quiet', onQuit),
   );
-  card.append(hint, alert, actions);
+  card.append(game.node, hint, alert, actions);
 
   return {
     node,
@@ -91,6 +112,7 @@ export function createPauseScreen(session: GameSession, onQuit: () => void): Pau
     refresh() {
       const info = session.pauseInfo;
       if (!info) return;
+      game.show(session.config?.mode ?? 'rhythm');
       hint.textContent = PAUSE_HINTS[info.reason];
       const lanes = info.heldLanes.length
         ? `Then hold the ${laneList(info.heldLanes)} ${lanesWord(info.heldLanes)} again during the count.`
@@ -171,6 +193,7 @@ export function createResultsScreen({
 }): ResultsScreen {
   const { node, card, title } = sheet('game-sheet--results');
   card.classList.add('game-card--results');
+  const game = gameLine();
   const song = el('p', 'game-card-text');
   const stars = el('div', 'result-stars');
   stars.setAttribute('role', 'img');
@@ -184,7 +207,7 @@ export function createResultsScreen({
   const retry = gestureButton('Retry', 'primary', onRetry);
   const actions = el('div', 'game-card-actions');
   actions.append(retry, gestureButton('Song list', 'quiet', onSongList));
-  card.append(song, stars, scoreLine, stats, actions, summary);
+  card.append(game.node, song, stars, scoreLine, stats, actions, summary);
 
   return {
     node,
@@ -192,6 +215,7 @@ export function createResultsScreen({
     show(results, recorded) {
       const heading = resultHeading(results);
       title.textContent = heading;
+      game.show(results.mode);
       song.textContent = `${results.songTitle}. ${settingsLine(results)}.`;
       stars.setAttribute('aria-label', `${results.stars} of 3 stars`);
       stars.replaceChildren(

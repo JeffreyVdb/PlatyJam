@@ -1,22 +1,29 @@
 import { approximateMs } from '../audio/latency-warning';
 import type { LatencyOffsets } from '../audio/timeline';
-import type { FailMode } from '../game/session-contract';
+import type { FailMode, GameMode } from '../game/session-contract';
 import type { Settings } from '../save/save-data';
 import { button, choice, el, slider, uid } from './controls';
 import { nearestScrollSpeed, SCROLL_SPEEDS } from './flow';
+import { GAMES, gamePreview } from './games';
 import { type Screen, screenFrame } from './screens';
 
 export type VolumeKind = 'masterVolume' | 'accompanimentVolume';
 
 export interface SettingsScreenOptions {
   settings: () => Readonly<Settings>;
+  /** The games to offer. */
+  modes: readonly GameMode[];
+  /** The game being played (the saved one, if it is offered). */
+  mode: () => GameMode;
   /** The latency offsets in use, for the Timing line. */
   offsets: () => Readonly<LatencyOffsets>;
   /** The audio output latency in ms, `undefined` when unknown. */
   outputLatency: () => number | undefined;
-  /** Fail mode or scroll speed (applies to the next run), or the delayed-sound warning. */
+  /** The game, fail mode or scroll speed (for the next run), or the delayed-sound warning. */
   onChange: (
-    patch: Partial<Pick<Settings, 'failMode' | 'scrollDurationMs' | 'latencyWarningMutedAtMs'>>,
+    patch: Partial<
+      Pick<Settings, 'gameMode' | 'failMode' | 'scrollDurationMs' | 'latencyWarningMutedAtMs'>
+    >,
   ) => void;
   /** While a volume slider moves: apply it to the sound at once. */
   onVolume: (kind: VolumeKind, volume: number) => void;
@@ -33,11 +40,6 @@ export interface SettingsScreen extends Screen {
   readonly calibrateButton: HTMLElement;
 }
 
-const FAIL_MODE_HINTS: Record<FailMode, string> = {
-  classic: 'The first missed note ends the song.',
-  relaxed: 'A miss breaks your combo, and the song plays on.',
-};
-
 const seconds = (ms: number) => `${(ms / 1000).toFixed(ms % 100 === 0 ? 1 : 2)} s`;
 
 const signedMs = (ms: number) => `${ms > 0 ? '+' : ''}${ms} ms`;
@@ -51,7 +53,7 @@ function group(title: string, ...children: HTMLElement[]): HTMLElement {
   return section;
 }
 
-/** Fail mode, scroll speed, volumes and the latency calibration. */
+/** The game, fail mode, scroll speed, volumes and the latency calibration. */
 export function createSettingsScreen(options: SettingsScreenOptions): SettingsScreen {
   const frame = screenFrame({
     name: 'settings',
@@ -62,6 +64,30 @@ export function createSettingsScreen(options: SettingsScreenOptions): SettingsSc
   const initial = options.settings();
 
   const failHint = el('p', 'settings-hint');
+  const showFailHint = () => {
+    failHint.textContent = GAMES[options.mode()].failHints[options.settings().failMode];
+  };
+  const game = choice<GameMode>({
+    legend: 'Game',
+    hideLegend: true,
+    className: 'choice--games',
+    options: options.modes.map((value) => ({
+      value,
+      label: GAMES[value].name,
+      decorate: (face) => {
+        face.dataset.mode = value;
+        face.prepend(gamePreview(value));
+        face.querySelector('.choice-label')?.prepend(GAMES[value].icon());
+        face.append(el('span', 'choice-text', GAMES[value].line));
+      },
+    })),
+    value: options.mode(),
+    onChange: (value) => {
+      options.onChange({ gameMode: value });
+      showFailHint();
+    },
+  });
+
   const failMode = choice<FailMode>({
     legend: 'When you miss',
     options: [
@@ -70,8 +96,8 @@ export function createSettingsScreen(options: SettingsScreenOptions): SettingsSc
     ],
     value: initial.failMode,
     onChange: (value) => {
-      failHint.textContent = FAIL_MODE_HINTS[value];
       options.onChange({ failMode: value });
+      showFailHint();
     },
   });
 
@@ -124,6 +150,7 @@ export function createSettingsScreen(options: SettingsScreenOptions): SettingsSc
 
   const column = el('div', 'screen-column');
   column.append(
+    group('Game', game.node),
     group('Playing', failMode.node, failHint, scroll.node, scrollHint),
     group('Sound', master.node, accompaniment.node, accompanimentHint, outputLatency, muted),
     group('Timing', timingText, timing, calibrateButton),
@@ -145,8 +172,9 @@ export function createSettingsScreen(options: SettingsScreenOptions): SettingsSc
       mutedAt === null
         ? ''
         : `PlatyJam won't warn you before a song when the sound is delayed by about ${approximateMs(mutedAt)} ms.`;
+    game.set(options.mode());
     failMode.set(settings.failMode);
-    failHint.textContent = FAIL_MODE_HINTS[settings.failMode];
+    showFailHint();
     const speed = nearestScrollSpeed(settings.scrollDurationMs);
     scroll.set(speed.ms);
     scrollHint.textContent = `Tiles take ${seconds(settings.scrollDurationMs)} to reach the line.`;

@@ -54,3 +54,33 @@ export function noteIcon(): SVGSVGElement {
   svg.append(head);
   return svg;
 }
+
+/** Rhythm: a tile landing on the line. */
+export function rhythmIcon(): SVGSVGElement {
+  return strokeIcon('rhythm-icon', [
+    'M9 3.5h6a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5H9A1.5 1.5 0 0 1 7.5 12V5A1.5 1.5 0 0 1 9 3.5z',
+    'M3.5 18h17',
+  ]);
+}
+
+/** Tiles: a short tile and a long one, in two columns. */
+export function tilesIcon(): SVGSVGElement {
+  return strokeIcon('tiles-icon', [
+    'M5.5 3.5h3a1.5 1.5 0 0 1 1.5 1.5v4a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 4 9V5a1.5 1.5 0 0 1 1.5-1.5z',
+    'M15.5 8.5h3A1.5 1.5 0 0 1 20 10v9a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 14 19v-9a1.5 1.5 0 0 1 1.5-1.5z',
+  ]);
+}
+
+/** Change game: two arrows swapping places. */
+export function swapIcon(): SVGSVGElement {
+  return strokeIcon('swap-icon', ['M4.5 8h14l-3.5-3.5', 'M19.5 16h-14l3.5 3.5']);
+}
+
+/** How to play: a question mark in a circle. */
+export function helpIcon(): SVGSVGElement {
+  return strokeIcon('help-icon', [
+    'M12 20.5a8.5 8.5 0 1 0 0-17 8.5 8.5 0 0 0 0 17z',
+    'M9.6 9.4a2.5 2.5 0 1 1 3.4 2.4c-.6.3-1 .8-1 1.5v.4',
+    'M12 16.8v.2',
+  ]);
+}

@@ -4,6 +4,8 @@ import {
   FAIL_MODES,
   type FailMode,
   type FinalResults,
+  GAME_MODES,
+  type GameMode,
   MAX_SCROLL_DURATION_MS,
   MIN_SCROLL_DURATION_MS,
   type Tempo,
@@ -16,9 +18,13 @@ import {
  * synced to the server as one document.
  */
 
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 
 export interface Settings {
+  /** The game last picked on Home or in Settings. */
+  gameMode: GameMode;
+  /** Whether the player has seen each game's How to play card. */
+  seenIntro: Record<GameMode, boolean>;
   failMode: FailMode;
   /** Real ms a tile is visible before the hit line. */
   scrollDurationMs: number;
@@ -59,11 +65,13 @@ export interface BestScore {
 export interface SaveData {
   version: typeof SAVE_VERSION;
   settings: Settings;
-  /** Keyed by `bestKey()`: `<songId>/<difficulty>/<tempo>`. */
+  /** Keyed by `bestKey()`: `<mode>/<songId>/<difficulty>/<tempo>`. */
   bests: Record<string, BestScore>;
 }
 
 export const DEFAULT_SETTINGS: Readonly<Settings> = {
+  gameMode: 'rhythm',
+  seenIntro: { rhythm: false, tiles: false },
   failMode: 'classic',
   scrollDurationMs: DEFAULT_SCROLL_DURATION_MS,
   tempo: 1,
@@ -75,16 +83,25 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
 };
 
 export function defaultSave(): SaveData {
-  return { version: SAVE_VERSION, settings: { ...DEFAULT_SETTINGS }, bests: {} };
+  return {
+    version: SAVE_VERSION,
+    settings: { ...DEFAULT_SETTINGS, seenIntro: { ...DEFAULT_SETTINGS.seenIntro } },
+    bests: {},
+  };
 }
 
-export function bestKey(songId: string, difficulty: DifficultyName, tempo: Tempo): string {
-  return `${songId}/${difficulty}/${tempo}`;
+export function bestKey(
+  mode: GameMode,
+  songId: string,
+  difficulty: DifficultyName,
+  tempo: Tempo,
+): string {
+  return `${mode}/${songId}/${difficulty}/${tempo}`;
 }
 
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const BEST_KEY = new RegExp(
-  `^[a-z0-9]+(?:-[a-z0-9]+)*/(?:${DIFFICULTIES.join('|')})/(?:${TEMPOS.join('|').replaceAll('.', '\\.')})$`,
+  `^(?:${GAME_MODES.join('|')})/[a-z0-9]+(?:-[a-z0-9]+)*/(?:${DIFFICULTIES.join('|')})/(?:${TEMPOS.join('|').replaceAll('.', '\\.')})$`,
 );
 
 type Fields = Partial<Record<string, unknown>>;
@@ -111,7 +128,13 @@ function parseSettings(json: unknown): Settings {
   const d = DEFAULT_SETTINGS;
   const { scrollDurationMs, masterVolume, accompanimentVolume, songId, latencyWarningMutedAtMs } =
     fields;
+  const seen = isRecord(fields.seenIntro) ? fields.seenIntro : {};
   return {
+    gameMode: oneOf(GAME_MODES, fields.gameMode, d.gameMode),
+    seenIntro: {
+      rhythm: seen.rhythm === true,
+      tiles: seen.tiles === true,
+    },
     failMode: oneOf(FAIL_MODES, fields.failMode, d.failMode),
     scrollDurationMs: isNumberIn(scrollDurationMs, MIN_SCROLL_DURATION_MS, MAX_SCROLL_DURATION_MS)
       ? scrollDurationMs
@@ -149,6 +172,22 @@ function parseBests(json: unknown): Record<string, BestScore> {
 }
 
 /**
+ * Version 1 had one game: its settings carry over playing Rhythm, and each best
+ * (`<songId>/<difficulty>/<tempo>`) becomes Rhythm's.
+ */
+function fromVersion1(json: Fields): Fields {
+  const settings = isRecord(json.settings) ? json.settings : {};
+  const bests = isRecord(json.bests) ? json.bests : {};
+  return {
+    version: 2,
+    settings: { ...settings, gameMode: 'rhythm', seenIntro: undefined },
+    bests: Object.fromEntries(
+      Object.entries(bests).map(([key, best]) => [`rhythm/${key}`, best] as const),
+    ),
+  };
+}
+
+/**
  * Parsed JSON to a save. Never throws: anything unreadable reads as the defaults.
  *
  * Migrations go here: when the shape changes, bump `SAVE_VERSION` and the storage
@@ -156,7 +195,9 @@ function parseBests(json: unknown): Record<string, BestScore> {
  * a newer version than this code knows reads as the defaults.
  */
 export function parseSave(json: unknown): SaveData {
-  if (!isRecord(json) || json.version !== SAVE_VERSION) return defaultSave();
+  if (!isRecord(json)) return defaultSave();
+  if (json.version === 1) return parseSave(fromVersion1(json));
+  if (json.version !== SAVE_VERSION) return defaultSave();
   return {
     version: SAVE_VERSION,
     settings: parseSettings(json.settings),

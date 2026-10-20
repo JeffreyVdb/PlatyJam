@@ -214,6 +214,7 @@ export function createGameplaySession({
       accuracy: accuracyOf(current.score),
       outcome,
       ...(current.failure ? { failure: { ...current.failure } } : {}),
+      mode: cfg.mode,
       songId: cfg.chart.id,
       songTitle: cfg.chart.title,
       difficulty: cfg.difficulty,
@@ -562,6 +563,7 @@ export function createGameplaySession({
             setState('error');
             return;
           }
+          // Tiles has no rules of its own yet (PLA-14): every mode plays Rhythm.
           config = { ...rest, chart: loaded };
           sim = newSimulation();
           setState('ready');
