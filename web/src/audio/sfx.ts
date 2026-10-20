@@ -34,7 +34,7 @@ export const EFFECT_GAIN: Readonly<Record<Effect | 'fill', number>> = {
   complete: 0.32,
   miss: 0.44,
   combo: 0.32,
-  fill: 0.12,
+  fill: 0.15,
 };
 
 /** Each one-shot's length, seconds. */
