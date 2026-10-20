@@ -21,6 +21,7 @@ import {
 import type { SessionSetup, SessionState } from './session-contract';
 import { FINALIZE_GRACE_MS } from './simulation';
 import type { LaneSpot } from './input';
+import { POP_MS } from './tiles-simulation';
 import { createGameStage, type GameStage } from '../scene/game-stage';
 
 const tap = (t: number, lane: number, pitches = [60]): Tile => ({ t, lane, pitches, vel: 100 });
@@ -1292,10 +1293,15 @@ describe('game session', () => {
     describe.each(LAYOUTS)('on the %s stage', (_, width, height) => {
       describe.each([-100, 0, 100])('with an input offset of %s ms', (offsetMs) => {
         let stage: ReturnType<typeof withStage>;
+        let tails: number[];
         /** Starts a Classic run; the stage shows the song 40 ms behind the clock. */
         const start = async (tiles: Tile[]) => {
           await loadTiles(tiles);
           stage = withStage(width, height);
+          tails = [];
+          session.events.on('judgment', (event) => {
+            if (event.unit === 'tail') tails.push(event.songMs);
+          });
           fake.inputOffsetMs = offsetMs;
           fake.outputLagMs = 40;
           session.start();
@@ -1339,6 +1345,62 @@ describe('game session', () => {
           release('a');
           expect(session.state).toBe('playing');
           expect(session.stats()).toMatchObject({ clear: 2, miss: 0 });
+        });
+
+        // What can be pressed and what is drawn agree: a cleared tile is a harmless
+        // target exactly while its pop shows, whenever its judgment is delivered.
+        describe.each([8, 16, 33])('at %s ms a frame', (step) => {
+          it('pops a tap from its claim; a touch there is harmless only while it shows', async () => {
+            await start([tap(500, 0), tap(3000, 1)]);
+            playTo(200, step, stage.draw);
+            touch('a', 0, on(500));
+            stage.draw(0);
+            expect(stage.count('flashes')).toBe(1);
+            playTo(200 + POP_MS - 10, step, stage.draw);
+            expect(stage.count('flashes')).toBe(1);
+            touch('b', 0, on(500));
+            expect(session.stats()).toMatchObject({ clear: 1, miss: 0 });
+            playTo(200 + POP_MS + 10, step, stage.draw);
+            expect(stage.count('flashes')).toBe(0);
+            touch('c', 0, on(500));
+            expect(session.state).toBe('failing');
+            expect(failure()).toEqual({ kind: 'emptyTap', lane: 0 });
+          });
+
+          it('pops a long tile once it shows full, before its judgment arrives; a touch on it then is harmless', async () => {
+            await start([hold(500, 2, 400), tap(3000, 1)]);
+            playTo(-200, step, stage.draw);
+            touch('a', 2, on(500));
+            playTo(880, step, stage.draw);
+            expect(stage.count('hold-bodies')).toBe(2);
+            playTo(900 + POP_MS - 10, step, stage.draw);
+            expect(stage.count('hold-bodies')).toBe(0);
+            expect(stage.count('flashes')).toBe(1);
+            expect(tails).toEqual([]);
+            touch('b', 2, on(700));
+            expect(session.state).toBe('playing');
+            expect(session.stats()).toMatchObject({ clear: 2, miss: 0 });
+            // Its judgment came in with that touch; it pops no second time.
+            expect(tails).toEqual([900]);
+            stage.draw(0);
+            expect(stage.count('flashes')).toBe(1);
+          });
+
+          it.each([
+            ['once its pop is over', POP_MS + 10],
+            ['after its judgment arrived', FINALIZE_GRACE_MS + 34],
+          ])('lets a full long tile go %s: a touch there is an empty tap', async (_, afterMs) => {
+            await start([hold(500, 2, 400), tap(3000, 1)]);
+            playTo(-200, step, stage.draw);
+            touch('a', 2, on(500));
+            playTo(900 + afterMs, step, stage.draw);
+            expect(stage.count('hold-bodies')).toBe(0);
+            expect(stage.count('flashes')).toBe(0);
+            touch('b', 2, on(700));
+            expect(session.state).toBe('failing');
+            expect(failure()).toEqual({ kind: 'emptyTap', lane: 2 });
+            expect(session.stats()).toMatchObject({ clear: 2, miss: 1 });
+          });
         });
       });
     });

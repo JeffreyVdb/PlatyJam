@@ -54,7 +54,9 @@ export const DEFAULT_EXIT_ALONG = 0.13;
 /**
  * Real ms a cleared tile pops for on the stage (its flash), and so how long a press
  * on it is still a harmless second press (a double-tap, a bouncing finger). After
- * that the tile is gone, and a press where it was is a tap on the water.
+ * that the tile is gone, and a press where it was is a tap on the water. The stage
+ * times the pop in song time from the same moment (a tap's claim, a long tile's
+ * `holdDoneTime`), so what is drawn and what can be pressed agree.
  */
 export const POP_MS = 180;
 
@@ -75,6 +77,25 @@ export function exitTime(
   tempo: number,
 ): number {
   return t + exitAlong * scrollDurationMs * tempo;
+}
+
+/**
+ * Chart ms at which a claimed long tile clears: full (`dur` after its note's start),
+ * or when its top has crossed the exit line, whichever comes first. The stage shows
+ * it clear and popping from then, though the judgment arrives after the session's
+ * finalization grace.
+ */
+export function holdDoneTime(
+  tile: Tile,
+  noteStartMs: number,
+  exitAlong: number,
+  scrollDurationMs: number,
+  tempo: number,
+): number {
+  return Math.min(
+    noteStartMs + (tile.dur ?? 0),
+    exitTime(tileEnd(tile), exitAlong, scrollDurationMs, tempo),
+  );
 }
 
 export interface TilesSimulationOptions extends SimulationOptions {
@@ -158,7 +179,7 @@ export function createTilesSimulation({
   /** When a claimed hold clears: full, or its top off the screen, whichever comes first. */
   const holdDoneAt = (hold: number) => {
     const tile = tileAt(hold);
-    return Math.min((noteStartMs[hold] ?? tile.t) + (tile.dur ?? 0), exitOf(tileEnd(tile)));
+    return holdDoneTime(tile, noteStartMs[hold] ?? tile.t, exitAlong, scrollDurationMs, tempo);
   };
 
   const judge = (

@@ -29,8 +29,8 @@ import type { JudgmentEvent, NotYetEvent } from '../game/session-contract';
 import type { StageView } from '../game/session';
 import { headDeadline } from '../game/judgment';
 import { prefersReducedMotion } from '../hud/motion';
-import { HEAD, TAIL } from '../game/simulation';
-import { exitTime, POP_MS } from '../game/tiles-simulation';
+import { HEAD, type Simulation, TAIL } from '../game/simulation';
+import { exitTime, holdDoneTime, POP_MS } from '../game/tiles-simulation';
 import { createHighwayMaterial, EDGE_MARGIN } from './highway-material';
 import {
   exitAlong,
@@ -98,11 +98,16 @@ const MAX_TILES = 160;
 const MAX_HOLD_SEGMENTS = 32;
 const MAX_BRIDGES = 24;
 const MAX_FLASHES = 16;
+/** Tiles: long tiles popping at once (at most two hold at a time). */
+const MAX_COMPLETIONS = LANES;
 const MAX_RIPPLES = 16;
 const MAX_DROPLETS = 160;
 
-/** Feedback lifetimes, real seconds (never song time, so they do not scale with tempo). */
-// A flash is also Tiles' pop, as long as a cleared tile can be pressed again (`POP_MS`).
+/**
+ * Feedback lifetimes, real seconds (never song time, so they do not scale with tempo).
+ * Tiles' pops last as long but are timed in song time from when the tile cleared
+ * (`popAge`), as the simulation times a press on it (`POP_MS`).
+ */
 const FLASH_S = POP_MS / 1000;
 const RIPPLE_S = 0.5;
 const DROPLET_S = 0.45;
@@ -224,6 +229,8 @@ interface Pool {
   colour: Color[];
   at: Float64Array;
   span: Float64Array;
+  /** Tiles' pops: the song ms the tile cleared at; NaN for feedback timed by `born`. */
+  songBorn: Float64Array;
   next: number;
 }
 
@@ -234,6 +241,7 @@ function createPool(size: number): Pool {
     colour: Array.from({ length: size }, () => new Color()),
     at: new Float64Array(size).fill(Number.NaN),
     span: new Float64Array(size),
+    songBorn: new Float64Array(size).fill(Number.NaN),
     next: 0,
   };
 }
@@ -330,6 +338,17 @@ export function createGameStage({
   /** Tiles: the tile shaking "not yet", and since when. */
   let shakeTile = -1;
   let shakeBorn = -Infinity;
+  /** Tiles: the long tiles popping this frame (filled by `layoutTiles`), and how far. */
+  const completions = {
+    lane: new Int8Array(MAX_COMPLETIONS),
+    at: new Float64Array(MAX_COMPLETIONS),
+    span: new Float64Array(MAX_COMPLETIONS),
+    age: new Float64Array(MAX_COMPLETIONS),
+    count: 0,
+  };
+  /** Tiles: long tiles whose completion has rippled, in the run of `celebratedIn`. */
+  const celebrated = new Set<number>();
+  let celebratedIn: Simulation | undefined;
 
   const build = (): Resources => {
     builds += 1;
@@ -440,7 +459,12 @@ export function createGameStage({
     flashGeometry.rotateX(-Math.PI / 2);
     flashGeometry.translate(0, 0.012, 0);
     const flashMaterial = new MeshBasicMaterial({ ...additive });
-    const flashMesh = dynamicMesh(flashGeometry, flashMaterial, MAX_FLASHES, root);
+    const flashMesh = dynamicMesh(
+      flashGeometry,
+      flashMaterial,
+      MAX_FLASHES + MAX_COMPLETIONS,
+      root,
+    );
     flashMesh.name = 'flashes';
 
     const rippleGeometry = new RingGeometry(0.4, 0.46, 48);
@@ -546,7 +570,46 @@ export function createGameStage({
     pool.colour[slot]?.copy(tint);
     pool.at[slot] = at;
     pool.span[slot] = span;
+    pool.songBorn[slot] = Number.NaN;
     return slot;
+  };
+
+  /**
+   * Tiles: how far through its pop (0 to 1) a tile that cleared at song ms `from` is,
+   * in song time as the simulation lets a press on it go (`POP_MS` × tempo); NaN when
+   * it is not popping. Only while the run goes on: the fail rewind plays no pops back.
+   */
+  const popAge = (from: number) => {
+    const config = shown?.config;
+    if (!shown || !config || shown.state === 'failing' || shown.state === 'finished') {
+      return Number.NaN;
+    }
+    const age = (shown.songMs - from) / (POP_MS * config.tempo);
+    return age >= 0 && age < 1 ? age : Number.NaN;
+  };
+
+  /** Tiles: a long tile that has filled pops whole, from when it filled; it ripples once. */
+  const popCompletion = (index: number, tile: Tile, doneAt: number) => {
+    const age = popAge(doneAt);
+    if (Number.isNaN(age)) return;
+    const slot = completions.count;
+    if (slot < MAX_COMPLETIONS) {
+      completions.lane[slot] = tile.lane;
+      completions.at[slot] = tile.t;
+      completions.span[slot] = tile.dur ?? 0;
+      completions.age[slot] = age;
+      completions.count += 1;
+    }
+    if (celebratedIn !== shown?.simulation) {
+      celebrated.clear();
+      celebratedIn = shown?.simulation;
+    }
+    if (celebrated.has(index)) return;
+    celebrated.add(index);
+    if (still) return;
+    spawn(ripples, tile.lane, LILY, tileEnd(tile));
+    burst(tile.lane, LILY, 8, tileEnd(tile));
+    pulse = Math.min(1, pulse + 0.25);
   };
 
   /** World z of an effect slot this frame: on the line, or with its tile. */
@@ -590,6 +653,7 @@ export function createGameStage({
     let tileCount = 0;
     let bodyCount = 0;
     let bridgeCount = 0;
+    completions.count = 0;
     if (!config) {
       res.tiles.count = 0;
       res.bodies.count = 0;
@@ -642,7 +706,24 @@ export function createGameStage({
         const base = z + tileLength / 2;
         const bottom = Math.min(exitZ, base);
         const claimed = tail === TAIL.holding || tail === TAIL.suspended;
-        if (tail !== TAIL.clear && top < bottom) {
+        // It clears when full (or when its top falls off): from then on it pops, though
+        // its judgment arrives only after the session's finalization grace. A press on
+        // it is harmless for as long as the pop shows.
+        const doneAt =
+          tail === TAIL.clear
+            ? (simulation?.holdEndMs[i] ?? Number.NaN)
+            : tail === TAIL.holding
+              ? holdDoneTime(
+                  tile,
+                  simulation?.noteStartMs[i] ?? tile.t,
+                  exit,
+                  config.scrollDurationMs,
+                  config.tempo,
+                )
+              : Number.NaN;
+        if (songMs >= doneAt) {
+          popCompletion(i, tile, doneAt);
+        } else if (tail !== TAIL.clear && top < bottom) {
           if (tail === TAIL.missed || head === HEAD.missed || lapsed) {
             const stopped = simulation?.holdEndMs[i] ?? Number.NaN;
             const from = Number.isNaN(stopped)
@@ -782,27 +863,48 @@ export function createGameStage({
     if (res.glows.instanceColor) res.glows.instanceColor.needsUpdate = true;
   };
 
+  /** One flash, `age` (0 to 1) through, at world z `z`; `span` chart ms makes it a long tile's. */
+  const placeFlash = (
+    res: Resources,
+    slot: number,
+    lane: number,
+    z: number,
+    age: number,
+    span: number,
+    tint: Color,
+  ) => {
+    // A Tiles pop covers its whole tile, a long one included.
+    const config = shown?.config;
+    const length =
+      span > 0 && config
+        ? 1 + (span / (config.scrollDurationMs * config.tempo)) * (layout.far / layout.tileDepth)
+        : 1;
+    dummy.position.set(laneX(lane), 0, z);
+    dummy.scale.set(1 + age * 0.35, 1, (1 + age * 0.6) * length);
+    dummy.updateMatrix();
+    res.flashes.setMatrixAt(slot, dummy.matrix);
+    res.flashes.setColorAt(slot, colour.copy(tint).multiplyScalar((1 - age) ** 2));
+  };
+
   const layoutEffects = (res: Resources) => {
     let flashCount = 0;
     for (let i = 0; i < MAX_FLASHES; i += 1) {
       const lane = flashes.lane[i] ?? -1;
-      const age = (clock - (flashes.born[i] ?? -Infinity)) / FLASH_S;
-      if (lane < 0 || age >= 1) continue;
-      // A Tiles pop covers its whole tile, a long one included.
+      const songBorn = flashes.songBorn[i] ?? Number.NaN;
+      const age = Number.isNaN(songBorn)
+        ? (clock - (flashes.born[i] ?? -Infinity)) / FLASH_S
+        : popAge(songBorn);
+      if (lane < 0 || !(age < 1)) continue;
       const span = flashes.span[i] ?? 0;
-      const config = shown?.config;
-      const length =
-        span > 0 && config
-          ? 1 + (span / (config.scrollDurationMs * config.tempo)) * (layout.far / layout.tileDepth)
-          : 1;
-      dummy.position.set(laneX(lane), 0, effectZ(flashes, i));
-      dummy.scale.set(1 + age * 0.35, 1, (1 + age * 0.6) * length);
-      dummy.updateMatrix();
-      res.flashes.setMatrixAt(flashCount, dummy.matrix);
-      res.flashes.setColorAt(
-        flashCount,
-        colour.copy(flashes.colour[i] ?? FOAM).multiplyScalar((1 - age) ** 2),
-      );
+      placeFlash(res, flashCount, lane, effectZ(flashes, i), age, span, flashes.colour[i] ?? FOAM);
+      flashCount += 1;
+    }
+    const config = shown?.config;
+    for (let i = 0; i < completions.count && config && shown; i += 1) {
+      const span = completions.span[i] ?? 0;
+      const windowMs = config.scrollDurationMs * config.tempo;
+      const z = tileDepth((completions.at[i] ?? 0) + span / 2, shown.songMs, windowMs, layout.far);
+      placeFlash(res, flashCount, completions.lane[i] ?? 0, z, completions.age[i] ?? 0, span, LILY);
       flashCount += 1;
     }
     res.flashes.count = flashCount;
@@ -907,14 +1009,15 @@ export function createGameStage({
       if (event.judgment !== 'miss' && config?.mode === 'tiles') {
         laneSnag[event.lane] = -Infinity;
         const tile = config.chart.difficulties[config.difficulty].tiles[event.tileIndex];
-        if (!tile) return;
-        // The tile pops where it is: a tap or a long tile's head when claimed, the
-        // whole long tile when it has filled.
-        const whole = event.unit === 'tail';
-        spawn(flashes, event.lane, LILY, tile.t, whole ? (tile.dur ?? 0) : 0);
+        // A long tile pops whole from when it filled (`layoutTiles`), before this comes.
+        if (!tile || event.unit === 'tail') return;
+        // A tap, or a long tile's head, pops where it is when claimed, timed from the
+        // claim in song time.
+        const slot = spawn(flashes, event.lane, LILY, tile.t);
+        flashes.songBorn[slot] = event.songMs;
         if (still) return;
-        spawn(ripples, event.lane, LILY, whole ? tileEnd(tile) : tile.t);
-        burst(event.lane, LILY, whole ? 8 : 5, whole ? tileEnd(tile) : tile.t);
+        spawn(ripples, event.lane, LILY, tile.t);
+        burst(event.lane, LILY, 5, tile.t);
         pulse = Math.min(1, pulse + 0.25);
         return;
       }
