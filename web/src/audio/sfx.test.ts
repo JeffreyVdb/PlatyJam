@@ -792,6 +792,7 @@ describe('headroom', () => {
       durationMs: 9000,
       scrollDurationMs: 1000,
       exitAlong: 0.13,
+      sizing: { base: 0, floor: 0, seam: 0 },
       onJudgment(event) {
         const cues = effectCues(event, 'tiles');
         if (event.judgment === 'miss') misses.push(played.length);

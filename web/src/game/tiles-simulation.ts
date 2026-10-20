@@ -1,4 +1,5 @@
-import { LANES, type Tile, tileEnd } from '../chart/schema';
+import { LANES, type Tile } from '../chart/schema';
+import { type TileSizing, tileSpans } from '../scene/lane-layout';
 import { createScore, scoreUnit } from './scoring';
 import type { Failure, Judgment, JudgmentEvent } from './session-contract';
 import {
@@ -16,12 +17,15 @@ import {
  * misses and hold completions are finalized in time order, strictly before each
  * input and up to each `advance`.
  *
- * Timing doesn't matter. A tile can be claimed from the moment it appears at the top
- * of the lane until its head has crossed the stage's exit line, but only in order:
- * the earliest unclaimed tile, or both tiles of an unclaimed double. A pointer press
- * claims the tile it lands on (`TileAim`); a key claims the next tile in its lane. A
- * press on no tile at all is an empty tap. Every cleared unit (tap, hold head, hold
- * tail) is judged `clear`.
+ * Timing doesn't matter. Each tile is a block from its time (its bottom edge) up to
+ * its top, `tileSpan` chart ms later (a long tile at least its note's length), drawn
+ * exactly so on the stage. It can be claimed from the moment it appears at the top of
+ * the screen until its bottom edge reaches the bottom of the screen (as in Magic
+ * Tiles), but only in order: the earliest unclaimed tile, or both tiles of an
+ * unclaimed double. So tiles are lost in chart order; a lost tile is drawn red until
+ * its top has left the screen. A pointer press claims the tile it lands on
+ * (`TileAim`); a key claims the next tile in its lane. A press on no tile at all is
+ * an empty tap. Every cleared unit (tap, hold head, hold tail) is judged `clear`.
  *
  * A long tile fills from its note's start (`noteStartMs`) for its `dur` and clears
  * when full, or when its top leaves the screen first; letting go before that is a
@@ -46,19 +50,29 @@ export interface TilesRules {
 export const TILES_RULES: Readonly<TilesRules> = { laterTile: 'notYet', melody: 'onBeat' };
 
 /**
- * Where a tile is lost until the stage says (`setExitAlong`), in scroll windows past
- * the hit line: about the handheld layout's.
- */
-export const DEFAULT_EXIT_ALONG = 0.13;
-
-/**
- * Real ms a cleared tile pops for on the stage (its flash), and so how long a press
- * on it is still a harmless second press (a double-tap, a bouncing finger). After
- * that the tile is gone, and a press where it was is a tap on the water. The stage
- * times the pop in song time from the same moment (a tap's claim, a long tile's
- * `holdDoneTime`), so what is drawn and what can be pressed agree.
+ * Real ms a cleared tile pops for on the stage (its lily flash), timed in song time
+ * from its claim (a long tile's from `holdDoneTime`). It then rides off translucent,
+ * still drawn, so a press on it stays a harmless second press (a double-tap, a
+ * bouncing finger) until its top has left the screen, like a lost tile drawn red.
+ * (A lost tile is no longer pressable from the moment its bottom edge reaches the
+ * bottom of the screen, but a press on its red remainder is just as harmless.)
  */
 export const POP_MS = 180;
+
+/**
+ * A Classic failure in Tiles, as in Magic Tiles: the board freezes where it is. If
+ * the offender is a tile never claimed, lost as its bottom edge reached the bottom of
+ * the screen, the board slides back over `TILES_FAIL_SLIDE_MS` (real ms) just far
+ * enough to show it whole above the bottom edge (the finalization grace it went on
+ * scrolling for). A long tile let go too soon is still on screen: it stays put. Then the offender (or the spot of an empty tap) blinks red
+ * `TILES_FAIL_BLINKS` times, `TILES_FAIL_BLINK_MS` each, and the results follow
+ * `TILES_FAIL_RESULTS_MS` after the failure.
+ */
+export const TILES_FAIL_SLIDE_MS = 280;
+export const TILES_FAIL_BLINKS = 3;
+export const TILES_FAIL_BLINK_MS = 260;
+export const TILES_FAIL_RESULTS_MS =
+  TILES_FAIL_SLIDE_MS + TILES_FAIL_BLINKS * TILES_FAIL_BLINK_MS + 340;
 
 /** Chart ms at which a tile at `t` appears at the top of the lane. */
 export function appearTime(t: number, scrollDurationMs: number, tempo: number): number {
@@ -66,27 +80,32 @@ export function appearTime(t: number, scrollDurationMs: number, tempo: number): 
 }
 
 /**
- * Chart ms at which a tile at `t` has crossed the exit line, `exitAlong` scroll
- * windows past the hit line. A function of the scroll duration in force, so a
- * speed that changes during a song only has to change what it is given.
+ * Chart ms at which chart ms `ms` along the lane reaches the bottom edge of the
+ * screen (the exit line, `exitAlong` scroll windows past the line): a tile's time
+ * for when it is lost, its top (its time plus its span) for when it has left. A
+ * function of the scroll duration in force, so a speed that changes during a song
+ * only has to change what it is given.
  */
 export function exitTime(
-  t: number,
+  ms: number,
   exitAlong: number,
   scrollDurationMs: number,
   tempo: number,
 ): number {
-  return t + exitAlong * scrollDurationMs * tempo;
+  return ms + exitAlong * scrollDurationMs * tempo;
 }
 
 /**
- * Chart ms at which a claimed long tile clears: full (`dur` after its note's start),
- * or when its top has crossed the exit line, whichever comes first. The stage shows
- * it clear and popping from then, though the judgment arrives after the session's
- * finalization grace.
+ * Chart ms at which a claimed long tile, `span` chart ms tall, clears: full (`dur`
+ * after its note's start), or when its top has left the screen, whichever comes
+ * first. The stage shows it clear and popping from then, though the judgment arrives
+ * after the session's finalization grace. Unlike a tile never claimed (lost as its
+ * bottom edge reaches the bottom of the screen), a claimed one is held for as long as
+ * any of it is drawn.
  */
 export function holdDoneTime(
   tile: Tile,
+  span: number,
   noteStartMs: number,
   exitAlong: number,
   scrollDurationMs: number,
@@ -94,15 +113,17 @@ export function holdDoneTime(
 ): number {
   return Math.min(
     noteStartMs + (tile.dur ?? 0),
-    exitTime(tileEnd(tile), exitAlong, scrollDurationMs, tempo),
+    exitTime(tile.t + span, exitAlong, scrollDurationMs, tempo),
   );
 }
 
 export interface TilesSimulationOptions extends SimulationOptions {
   /** Real ms a tile takes from the top of the lane to the hit line. */
   scrollDurationMs: number;
-  /** Where a tile is lost, in scroll windows past the hit line (`setExitAlong` changes it). */
+  /** Where a tile is lost, in scroll windows past the line (`setExitAlong` changes it). */
   exitAlong: number;
+  /** How tall tiles are drawn (`tileSizing`; `setTileSizing` changes it). */
+  sizing: Readonly<TileSizing>;
   /** Defaults to `TILES_RULES`. */
   rules?: Partial<TilesRules>;
   /** A press on a tile that is not next yet, ignored under `laterTile: 'notYet'`. */
@@ -116,6 +137,7 @@ export function createTilesSimulation({
   durationMs,
   scrollDurationMs,
   exitAlong: initialExitAlong,
+  sizing: initialSizing,
   rules,
   onJudgment,
   onNotYet,
@@ -126,10 +148,11 @@ export function createTilesSimulation({
   const tails = new Uint8Array(count);
   const holdEndMs = new Float64Array(count).fill(Number.NaN);
   const noteStartMs = new Float64Array(count).fill(Number.NaN);
-  /** When a tile cleared and began to pop: a tap at its claim, a long tile when full. */
-  const clearedMs = new Float64Array(count).fill(Number.NaN);
   const score = createScore();
   let exitAlong = initialExitAlong;
+  const windowMs = scrollDurationMs * tempo;
+  /** Each tile's span, chart ms: the same `tileSpan` the stage draws it with. */
+  let spans = tileSpans(tiles, windowMs, initialSizing);
 
   const laneTiles: number[][] = Array.from({ length: LANES }, () => []);
   let unresolved = 0;
@@ -145,8 +168,7 @@ export function createTilesSimulation({
   const laneCursor = new Array<number>(LANES).fill(0);
   /** Per lane: no tile before it can be pressed again (its top has left the screen). */
   const laneFloor = new Array<number>(LANES).fill(0);
-  // Heads are lost in chart order (exit = t + constant), so one cursor finds the next,
-  // and that tile is also the earliest unclaimed one: the next to claim.
+  /** The earliest unclaimed head: the next to claim, and the next to be lost. */
   let expiryCursor = 0;
   /** Holds currently `holding`, in no particular order. */
   const active: number[] = [];
@@ -175,11 +197,23 @@ export function createTilesSimulation({
     return tile;
   };
 
-  const exitOf = (t: number) => exitTime(t, exitAlong, scrollDurationMs, tempo);
+  /** Chart ms of a tile's top. */
+  const topOf = (index: number) => tileAt(index).t + (spans[index] ?? 0);
+  /** When an unclaimed tile is lost: its bottom edge at the bottom of the screen. */
+  const lostAt = (index: number) => exitTime(tileAt(index).t, exitAlong, scrollDurationMs, tempo);
+  /** When a tile has left the screen: its top past the bottom edge. */
+  const goneAt = (index: number) => exitTime(topOf(index), exitAlong, scrollDurationMs, tempo);
   /** When a claimed hold clears: full, or its top off the screen, whichever comes first. */
   const holdDoneAt = (hold: number) => {
     const tile = tileAt(hold);
-    return holdDoneTime(tile, noteStartMs[hold] ?? tile.t, exitAlong, scrollDurationMs, tempo);
+    return holdDoneTime(
+      tile,
+      spans[hold] ?? 0,
+      noteStartMs[hold] ?? tile.t,
+      exitAlong,
+      scrollDurationMs,
+      tempo,
+    );
   };
 
   const judge = (
@@ -218,14 +252,13 @@ export function createTilesSimulation({
     unbind(hold);
     tails[hold] = judgment === 'miss' ? TAIL.missed : TAIL.clear;
     holdEndMs[hold] = songMs;
-    if (judgment !== 'miss') clearedMs[hold] = songMs;
     judge('tail', judgment, tile.lane, hold, songMs);
     if (judgment === 'miss') fail({ kind: 'missedTile', lane: tile.lane, tileIndex: hold }, songMs);
   };
 
   const expireHead = (index: number) => {
     const tile = tileAt(index);
-    const lost = exitOf(tile.t);
+    const lost = lostAt(index);
     heads[index] = HEAD.missed;
     const isHold = tile.dur !== undefined;
     judge(isHold ? 'head' : 'tap', 'miss', tile.lane, index, lost);
@@ -256,7 +289,7 @@ export function createTilesSimulation({
   const finalize = (limit: number): boolean => {
     while (status === 'running') {
       const head = nextPendingHead();
-      const lost = head < 0 ? Infinity : exitOf(tileAt(head).t);
+      const lost = head < 0 ? Infinity : lostAt(head);
       let hold = -1;
       let done = Infinity;
       for (const index of active) {
@@ -284,20 +317,16 @@ export function createTilesSimulation({
   };
 
   /**
-   * Whether a tile no longer waiting is still on the stage to be pressed: one lost
-   * (drawn red) or a long tile being held, or a cleared one while it pops.
+   * The tile a pointer press lands on: the next one if it can, else any other drawn
+   * there. A tile no longer waiting stays drawn until its top leaves the screen:
+   * cleared (riding off translucent), held, or lost (red, from when its bottom edge
+   * reached the bottom of the screen; `finalize` has already marked it).
    */
-  const stillThere = (index: number, songMs: number) => {
-    const cleared = clearedMs[index] ?? Number.NaN;
-    return Number.isNaN(cleared) || songMs - cleared < POP_MS * tempo;
-  };
-
-  /** The tile a pointer press lands on: the next one if it can, else any other still there. */
   const tileUnder = (lane: number, { ms, reachMs }: TileAim, songMs: number) => {
     const indices = laneTiles[lane] ?? [];
     let floor = laneFloor[lane] ?? 0;
     // A tile whose top has left the screen stays gone: start the search after it.
-    while (floor < indices.length && exitOf(tileEnd(tileAt(indices[floor] ?? 0))) < songMs) {
+    while (floor < indices.length && goneAt(indices[floor] ?? 0) < songMs) {
       floor += 1;
     }
     laneFloor[lane] = floor;
@@ -306,12 +335,13 @@ export function createTilesSimulation({
     for (let k = floor; k < indices.length; k += 1) {
       const index = indices[k] ?? 0;
       const tile = tileAt(index);
+      // The drawn block, bottom edge to top, and the slack beyond either edge.
       if (tile.t - reachMs > ms) break;
-      if (tileEnd(tile) + reachMs < ms) continue;
+      if (topOf(index) + reachMs < ms) continue;
       if (isNext(index)) return index;
       if (heads[index] === HEAD.pending) {
         if (pending < 0) pending = index;
-      } else if (other < 0 && stillThere(index, songMs)) {
+      } else if (other < 0) {
         other = index;
       }
     }
@@ -334,7 +364,6 @@ export function createTilesSimulation({
     heads[index] = HEAD.clear;
     noteStartMs[index] = melody === 'onBeat' ? Math.max(songMs, tile.t) : songMs;
     if (tile.dur === undefined) {
-      clearedMs[index] = songMs;
       judge('tap', 'clear', tile.lane, index, songMs);
       return;
     }
@@ -344,11 +373,12 @@ export function createTilesSimulation({
     bound.set(input, index);
   };
 
-  const emptyTap = (lane: number, songMs: number) => {
+  /** A press on no tile, at chart ms `at` along the lane (where it was drawn). */
+  const emptyTap = (lane: number, songMs: number, at: number) => {
     // Before t = 0 a stray press is ignored rather than penalized.
     if (songMs < 0) return;
     judge('empty', 'miss', lane, -1, songMs);
-    fail({ kind: 'emptyTap', lane }, songMs);
+    fail({ kind: 'emptyTap', lane, at }, songMs);
   };
 
   return {
@@ -374,7 +404,7 @@ export function createTilesSimulation({
       if (status !== 'running' || !finalize(songMs)) return;
       const index = aim ? tileUnder(lane, aim, songMs) : nextInLane(lane, songMs);
       if (index < 0) {
-        emptyTap(lane, songMs);
+        emptyTap(lane, songMs, aim?.ms ?? songMs);
       } else if (isNext(index)) {
         claim(input, index, songMs);
       } else if (heads[index] !== HEAD.pending) {
@@ -383,7 +413,7 @@ export function createTilesSimulation({
       } else if (laterTile === 'notYet') {
         onNotYet?.(lane, index);
       } else {
-        emptyTap(lane, songMs);
+        emptyTap(lane, songMs, aim?.ms ?? songMs);
       }
     },
 
@@ -445,6 +475,13 @@ export function createTilesSimulation({
 
     setExitAlong(along) {
       exitAlong = along;
+      // Where tiles leave moved: find again where each lane's pressable tiles start.
+      laneFloor.fill(0);
+    },
+
+    setTileSizing(sizing) {
+      spans = tileSpans(tiles, windowMs, sizing);
+      laneFloor.fill(0);
     },
   };
 

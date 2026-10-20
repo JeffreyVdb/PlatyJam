@@ -21,8 +21,9 @@ import {
 import type { SessionSetup, SessionState } from './session-contract';
 import { FINALIZE_GRACE_MS } from './simulation';
 import type { LaneSpot } from './input';
-import { POP_MS } from './tiles-simulation';
+import { POP_MS, TILES_FAIL_RESULTS_MS, TILES_FAIL_SLIDE_MS } from './tiles-simulation';
 import { createGameStage, type GameStage } from '../scene/game-stage';
+import { tileSizing, tileSpans } from '../scene/lane-layout';
 
 const tap = (t: number, lane: number, pitches = [60]): Tile => ({ t, lane, pitches, vel: 100 });
 const hold = (t: number, lane: number, dur: number): Tile => ({
@@ -191,6 +192,8 @@ function fakeAudio() {
 describe('game session', () => {
   let fake: ReturnType<typeof fakeAudio>;
   let states: SessionState[];
+  /** What the session reads as the player's reduced-motion choice. */
+  let reducedMotion = false;
   let session: ReturnType<typeof createGameplaySession>;
   let bus: Lifecycle;
   let cleared: number;
@@ -199,7 +202,9 @@ describe('game session', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     fake = fakeAudio();
     bus = createLifecycle();
+    reducedMotion = false;
     session = createGameplaySession({
+      reducedMotion: () => reducedMotion,
       audio: fake.audio,
       bus,
       now: () => fake.perf,
@@ -224,6 +229,7 @@ describe('game session', () => {
     tempo: 1,
     failMode: 'classic',
     scrollDurationMs: 1600,
+    tileSize: 'normal',
     ...overrides,
   });
 
@@ -1123,7 +1129,7 @@ describe('game session', () => {
       });
       stages.push(stage);
       stage.resize(width, height);
-      session.setExitAlong(stage.exitAlong());
+      session.setTilesFrame(stage.tilesFrame());
       session.events.on('judgment', (event) => {
         stage.onJudgment(event);
       });
@@ -1134,7 +1140,11 @@ describe('game session', () => {
         },
       } as unknown as WebGLRenderer;
       return {
-        exitAlong: stage.exitAlong(),
+        exitAlong: stage.tilesFrame().exitAlong,
+        /** Chart ms tile `index` of `tiles` reaches up to on this stage (its top). */
+        top: (tiles: Tile[], index: number) =>
+          (tiles[index]?.t ?? 0) +
+          (tileSpans(tiles, SCROLL_MS, tileSizing('normal', stage.tilesFrame()))[index] ?? 0),
         draw: (ms: number) => {
           stage.render(session.view(), ms / 1000, renderer);
         },
@@ -1195,11 +1205,13 @@ describe('game session', () => {
 
     it('never plays a tile nobody claimed, and fails Classic at the exit line', async () => {
       await loadTiles([tap(500, 0), tap(2500, 1)]);
-      session.setExitAlong(0.25); // lost 400 ms past the line
+      // Lost 400 ms past the line, as its bottom edge reaches the bottom of the screen
+      // (1.25 windows tall): at 900, though it is drawn 500 ms tall.
+      session.setTilesFrame({ exitAlong: 0.25, widthPx: 390, heightPx: 844 });
       session.start();
       frames(1880); // song 880
       expect(session.state).toBe('playing');
-      frames(400 + FINALIZE_GRACE_MS + 32);
+      frames(20 + FINALIZE_GRACE_MS + 32);
       expect(session.state).toBe('failing');
       expect(fake.piano.noteOn).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(3000);
@@ -1209,6 +1221,96 @@ describe('game session', () => {
         failure: { kind: 'missedTile', lane: 0, tileIndex: 0 },
         clear: 0,
         miss: 1,
+      });
+    });
+
+    describe('a Classic failure', () => {
+      // Lost 400 ms past the line; the screen is 1.25 windows tall, a lone tile 500 ms.
+      const FRAME = { exitAlong: 0.25, widthPx: 390, heightPx: 844 };
+      const failAt = async (tiles: Tile[], act: () => void) => {
+        await loadTiles(tiles);
+        session.setTilesFrame(FRAME);
+        session.start();
+        act();
+        expect(session.state).toBe('failing');
+        return shownMs();
+      };
+
+      it('freezes the board on an empty tap, with no rewind', async () => {
+        const frozen = await failAt([tap(500, 0), tap(2500, 1)], () => {
+          playTo(600);
+          touch('a', 2, { lane: 2, along: -0.5, reach: 0.01 });
+        });
+        // Where the finger landed, half a window up the lane from the board shown.
+        const failure = session.view().simulation?.failure;
+        expect(failure).toMatchObject({ kind: 'emptyTap', lane: 2 });
+        expect(failure?.kind === 'emptyTap' ? failure.at : NaN).toBeCloseTo(
+          frozen + 0.5 * SCROLL_MS,
+          6,
+        );
+        expect(session.view().songMs).toBeCloseTo(frozen, 6);
+        fake.advance(TILES_FAIL_SLIDE_MS * 3);
+        expect(session.view().songMs).toBeCloseTo(frozen, 6);
+      });
+
+      it('slides back a short way, just far enough to show a lost tile whole', async () => {
+        const frozen = await failAt([tap(500, 0), tap(2500, 1)], () => {
+          for (let i = 0; i < 400 && session.state !== 'failing'; i += 1) playTo(shownMs() + 16);
+        });
+        // Lost at 900, as its bottom edge reached the bottom; the Miss came a grace later.
+        expect(frozen).toBeGreaterThan(900 + FINALIZE_GRACE_MS - 20);
+        expect(frozen).toBeLessThan(900 + FINALIZE_GRACE_MS + 40);
+        expect(session.view().songMs).toBeCloseTo(frozen, 6);
+        fake.advance(TILES_FAIL_SLIDE_MS / 2);
+        const halfway = session.view().songMs;
+        expect(halfway).toBeLessThan(frozen);
+        expect(halfway).toBeGreaterThan(900);
+        // Its bottom edge on the bottom of the screen: 400 ms past the line.
+        fake.advance(TILES_FAIL_SLIDE_MS);
+        expect(session.view().songMs).toBeCloseTo(500 + 400, 6);
+        fake.advance(1000);
+        expect(session.view().songMs).toBeCloseTo(900, 6);
+      });
+
+      it('jumps there at once under reduced motion', async () => {
+        reducedMotion = true;
+        await failAt([tap(500, 0), tap(2500, 1)], () => {
+          for (let i = 0; i < 400 && session.state !== 'failing'; i += 1) playTo(shownMs() + 16);
+        });
+        expect(session.view().songMs).toBeCloseTo(900, 6);
+      });
+
+      // Drawn 800 ms tall, it is held until full at 1300, its top leaving at 1700: let
+      // go before its bottom edge is out (700) or after (1100), it is on screen.
+      it.each([700, 1100])('keeps a long tile let go on screen where it is (at %s)', async (ms) => {
+        const frozen = await failAt([hold(500, 2, 800), tap(3000, 1)], () => {
+          playTo(-200);
+          touch('a', 2, on(500));
+          playTo(ms);
+          release('a');
+        });
+        expect(session.view().simulation?.failure).toEqual({
+          kind: 'missedTile',
+          lane: 2,
+          tileIndex: 0,
+        });
+        expect(frozen).toBeCloseTo(ms, 6);
+        fake.advance(TILES_FAIL_SLIDE_MS / 2);
+        expect(session.view().songMs).toBeCloseTo(frozen, 6);
+        fake.advance(TILES_FAIL_SLIDE_MS * 2);
+        expect(session.view().songMs).toBeCloseTo(frozen, 6);
+      });
+
+      it('hands over the results once the offender has blinked', async () => {
+        await failAt([tap(500, 0), tap(2500, 1)], () => {
+          playTo(600);
+          touch('a', 2, { lane: 2, along: -0.5, reach: 0.01 });
+        });
+        await vi.advanceTimersByTimeAsync(TILES_FAIL_RESULTS_MS - 20);
+        expect(session.state).toBe('failing');
+        await vi.advanceTimersByTimeAsync(40);
+        expect(session.state).toBe('finished');
+        expect(session.results).toMatchObject({ outcome: 'failed', failure: { kind: 'emptyTap' } });
       });
     });
 
@@ -1269,7 +1371,7 @@ describe('game session', () => {
       expect(fake.piano.stopAll).toHaveBeenLastCalledWith(QUIT_FADE_MS);
     });
 
-    it('shakes a later tile instead of claiming it, and fails Classic on the water', async () => {
+    it('shakes a later tile instead of claiming it, and fails Classic on empty space', async () => {
       await loadTiles([tap(500, 0), tap(900, 1)]);
       const notYet: unknown[] = [];
       session.events.on('notyet', (event) => notYet.push(event));
@@ -1325,20 +1427,24 @@ describe('game session', () => {
         };
         const failure = () => session.view().simulation?.failure;
 
-        it('clears the next tile tapped just before it crosses the exit line', async () => {
-          await start([tap(500, 0), tap(3000, 1)]);
+        it('clears the next tile tapped just before its bottom edge is out', async () => {
+          const tiles = [tap(500, 0), tap(3000, 1)];
+          await start(tiles);
           playTo(500 + stage.exitAlong * SCROLL_MS - 8);
           touch('a', 0, on(500));
           expect(session.stats()).toMatchObject({ clear: 1, miss: 0 });
           expect(session.state).toBe('playing');
         });
 
-        it('loses it once it has crossed, and Classic fails on that tile', async () => {
-          await start([tap(500, 0), tap(3000, 1)]);
+        it('loses it once its bottom edge is out, and Classic fails on that tile', async () => {
+          const tiles = [tap(500, 0), tap(3000, 1)];
+          await start(tiles);
+          // Most of it is still on screen, but no longer to be claimed.
           playTo(500 + stage.exitAlong * SCROLL_MS + 8);
-          // The Miss still waits for the finalization grace; the tap brings it in.
+          // The Miss still waits for the finalization grace; a tap on what still shows
+          // of it brings it in.
           expect(session.state).toBe('playing');
-          touch('a', 0, on(500));
+          touch('a', 0, on(600));
           expect(session.state).toBe('failing');
           expect(failure()).toEqual({ kind: 'missedTile', lane: 0, tileIndex: 0 });
           expect(session.stats()).toMatchObject({ clear: 0, miss: 1 });
@@ -1365,23 +1471,28 @@ describe('game session', () => {
         });
 
         // What can be pressed and what is drawn agree: a cleared tile is a harmless
-        // target exactly while its pop shows, whenever its judgment is delivered.
+        // target for as long as it is drawn, riding off translucent, whenever its
+        // judgment is delivered.
         describe.each([8, 16, 33])('at %s ms a frame', (step) => {
-          it('pops a tap from its claim; a touch there is harmless only while it shows', async () => {
-            await start([tap(500, 0), tap(3000, 1)]);
+          it('pops a tap at its claim and lets it ride off, harmless until it leaves', async () => {
+            const tiles = [tap(500, 0), tap(3000, 1)];
+            await start(tiles);
             playTo(200, step, stage.draw);
             touch('a', 0, on(500));
             stage.draw(0);
-            expect(stage.count('flashes')).toBe(1);
-            playTo(200 + POP_MS - 10, step, stage.draw);
-            expect(stage.count('flashes')).toBe(1);
+            expect(stage.count('flat-claimed')).toBe(1);
+            playTo(200 + POP_MS + 10, step, stage.draw);
+            expect(stage.count('flat-claimed')).toBe(1);
             touch('b', 0, on(500));
             expect(session.stats()).toMatchObject({ clear: 1, miss: 0 });
-            playTo(200 + POP_MS + 10, step, stage.draw);
-            expect(stage.count('flashes')).toBe(0);
-            touch('c', 0, on(500));
-            expect(session.state).toBe('failing');
-            expect(failure()).toEqual({ kind: 'emptyTap', lane: 0 });
+            // Just before its top leaves the screen: still drawn, still harmless.
+            const leaves = stage.top(tiles, 0) + stage.exitAlong * SCROLL_MS;
+            playTo(leaves - 10, step, stage.draw);
+            expect(stage.count('flat-claimed')).toBe(1);
+            touch('c', 0, on(stage.top(tiles, 0)));
+            expect(session.state).toBe('playing');
+            playTo(leaves + 10, step, stage.draw);
+            expect(stage.count('flat-claimed')).toBe(0);
           });
 
           it('pops a long tile once it shows full, before its judgment arrives; a touch on it then is harmless', async () => {
@@ -1389,58 +1500,53 @@ describe('game session', () => {
             playTo(-200, step, stage.draw);
             touch('a', 2, on(500));
             playTo(880, step, stage.draw);
-            expect(stage.count('hold-bodies')).toBe(2);
+            expect(stage.count('flat-tiles')).toBe(2);
             playTo(900 + POP_MS - 10, step, stage.draw);
-            expect(stage.count('hold-bodies')).toBe(0);
-            expect(stage.count('flashes')).toBe(1);
+            expect(stage.count('flat-tiles')).toBe(0);
+            expect(stage.count('flat-claimed')).toBe(1);
             expect(tails).toEqual([]);
             touch('b', 2, on(700));
             expect(session.state).toBe('playing');
             expect(session.stats()).toMatchObject({ clear: 2, miss: 0 });
-            // Its judgment came in with that touch; it pops no second time.
+            // Its judgment came in with that touch; it is drawn as before.
             expect(tails).toEqual([900]);
             stage.draw(0);
-            expect(stage.count('flashes')).toBe(1);
+            expect(stage.count('flat-claimed')).toBe(1);
           });
 
           it.each([
             ['once its pop is over', POP_MS + 10],
             ['after its judgment arrived', FINALIZE_GRACE_MS + 34],
-          ])('lets a full long tile go %s: a touch there is an empty tap', async (_, afterMs) => {
+          ])('keeps a full long tile harmless %s, while it rides off', async (_, afterMs) => {
             await start([hold(500, 2, 400), tap(3000, 1)]);
             playTo(-200, step, stage.draw);
             touch('a', 2, on(500));
             playTo(900 + afterMs, step, stage.draw);
-            expect(stage.count('hold-bodies')).toBe(0);
-            expect(stage.count('flashes')).toBe(0);
+            expect(stage.count('flat-tiles')).toBe(0);
+            expect(stage.count('flat-claimed')).toBe(1);
             touch('b', 2, on(700));
-            expect(session.state).toBe('failing');
-            expect(failure()).toEqual({ kind: 'emptyTap', lane: 2 });
-            expect(session.stats()).toMatchObject({ clear: 2, miss: 1 });
+            expect(session.state).toBe('playing');
+            expect(session.stats()).toMatchObject({ clear: 2, miss: 0 });
           });
         });
 
-        it('leaves the last run’s pops behind on a restart: their spots are empty water', async () => {
+        it('leaves the last run’s tiles and effects behind on a restart', async () => {
           await start([tap(500, 0), tap(900, 1), tap(3000, 2)]);
           playTo(200, 16, stage.draw);
           touch('a', 0, on(500));
           touch('b', 1, on(900));
           stage.draw(0);
-          expect(stage.count('flashes')).toBe(2);
+          expect(stage.count('flat-claimed')).toBe(2);
+          expect(stage.count('ripples')).toBe(2);
           session.restart();
           stage.draw(0);
           expect(session.state).toBe('leadIn');
-          // The new run clears both tiles early; their pops are over well before 200.
+          expect(stage.count('flat-claimed')).toBe(0);
+          expect(stage.count('ripples')).toBe(0);
+          // The tiles wait again: tapping where they are claims them anew.
           playTo(-300, 16, stage.draw);
           touch('c', 0, on(500));
-          touch('d', 1, on(900));
-          // Where the last run's pops would be halfway through.
-          playTo(200 + POP_MS / 2, 16, stage.draw);
-          expect(stage.count('flashes')).toBe(0);
-          touch('e', 0, on(500));
-          expect(session.state).toBe('failing');
-          expect(failure()).toEqual({ kind: 'emptyTap', lane: 0 });
-          expect(session.stats()).toMatchObject({ clear: 2, miss: 1 });
+          expect(session.stats()).toMatchObject({ clear: 1, miss: 0 });
         });
       });
     });
@@ -1502,7 +1608,7 @@ describe('game session', () => {
         await loadTiles([tap(500, 0), tap(2500, 1)]);
         session.start();
         frames(1600);
-        touch('a', 2, { lane: 2, along: 0.9, reach: 0.01 }); // the water
+        touch('a', 2, { lane: 2, along: 0.9, reach: 0.01 }); // empty space
         expect(session.state).toBe('failing');
         expect(played()).toEqual(['miss']);
         expect(fake.effects.stopFills).toHaveBeenLastCalledWith(FAIL_FADE_MS);

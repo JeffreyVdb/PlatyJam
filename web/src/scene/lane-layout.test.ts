@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import type { Tile } from '../chart/schema';
-import { firstVisibleTile, laneForPoint, longestHold, tileDepth } from './lane-layout';
+import type { Chart, Tile } from '../chart/schema';
+import {
+  DEFAULT_TILES_FRAME,
+  firstVisibleTile,
+  laneForPoint,
+  longestHold,
+  MIN_TILE_PX,
+  TILE_HEIGHTS,
+  tileDepth,
+  tileSizing,
+  type TileSizing,
+  tileSpan,
+  tileSpans,
+} from './lane-layout';
 
 const tile = (t: number, dur?: number): Tile => ({
   t,
@@ -58,5 +70,168 @@ describe('lane layout', () => {
     expect(laneForPoint(2.1, 0, bounds)).toBe(3);
     expect(laneForPoint(-2.2, 0, bounds)).toBeUndefined();
     expect(laneForPoint(2.2, 0, bounds)).toBeUndefined();
+  });
+});
+
+describe('Tiles tile sizing', () => {
+  const at = (t: number, lane: number, dur?: number): Tile => ({
+    t,
+    lane,
+    pitches: [60],
+    vel: 80,
+    ...(dur === undefined ? {} : { dur }),
+  });
+  // A phone in portrait at Normal speed: the screen is 1 / 0.74 windows tall.
+  const windowMs = 1600;
+  const frame = DEFAULT_TILES_FRAME;
+  const screenMs = (1 + frame.exitAlong) * windowMs;
+  const normal = tileSizing('normal', frame);
+  const big = tileSizing('big', frame);
+  const ms = (windows: number) => windows * windowMs;
+  /** Spans both ways: the one-tile function and the one-pass one agree. */
+  const spans = (tiles: Tile[], sizing: TileSizing) => {
+    const all = Array.from(tileSpans(tiles, windowMs, sizing));
+    expect(all).toEqual(tiles.map((_, i) => tileSpan(tiles, i, windowMs, sizing)));
+    return all;
+  };
+
+  it('sizes tiles as fractions of the screen height, Big taller than Normal', () => {
+    expect(ms(normal.base)).toBeCloseTo(screenMs * TILE_HEIGHTS.normal.base, 6);
+    expect(ms(normal.floor)).toBeCloseTo(screenMs * TILE_HEIGHTS.normal.floor, 6);
+    expect(ms(big.base)).toBeCloseTo(screenMs / 3, 6);
+    expect(ms(big.floor)).toBeCloseTo(screenMs / 4, 6);
+    // About 540 ms, 210 px of a 844 px phone, and never under 170 px.
+    expect(ms(normal.base)).toBeCloseTo(540.5, 0);
+    expect((normal.floor / (1 + frame.exitAlong)) * frame.heightPx).toBeCloseTo(168.8, 1);
+    expect(big.base).toBeGreaterThan(normal.base);
+    expect(big.floor).toBeGreaterThan(normal.floor);
+    // A hairline seam: 2 px.
+    expect((normal.seam * frame.heightPx) / (1 + frame.exitAlong)).toBeCloseTo(2, 6);
+  });
+
+  it('keeps the floor a thumb tall on a very short screen', () => {
+    const px = (sizing: TileSizing, frame: { exitAlong: number; heightPx: number }) => ({
+      floor: (sizing.floor / (1 + frame.exitAlong)) * frame.heightPx,
+      base: (sizing.base / (1 + frame.exitAlong)) * frame.heightPx,
+    });
+    // A phone on its side: a fifth of the height is already more than a thumb.
+    const sideways = { exitAlong: 0.28, widthPx: 844, heightPx: 390 };
+    expect(px(tileSizing('normal', sideways), sideways).floor).toBeCloseTo(78, 6);
+    const sliver = { exitAlong: 0.28, widthPx: 500, heightPx: 200 };
+    expect(px(tileSizing('normal', sliver), sliver)).toEqual({
+      floor: expect.closeTo(MIN_TILE_PX, 6) as number,
+      base: expect.closeTo(MIN_TILE_PX, 6) as number,
+    });
+  });
+
+  it('builds a staircase: each tile reaches up to the next start, in any lane', () => {
+    // 480 ms apart: between the floor (432 ms) and the base (540 ms).
+    const tiles = [at(0, 0), at(480, 1), at(960, 2), at(1440, 3), at(1920, 0)];
+    expect(spans(tiles, normal)).toEqual([480, 480, 480, 480, ms(normal.base)]);
+    // Big's floor is above that: its tiles overlap their neighbours instead.
+    expect(spans(tiles, big)[0]).toBeCloseTo(ms(big.floor), 9);
+  });
+
+  it('caps a tile at the base height when the next one is far away', () => {
+    const tiles = [at(0, 0), at(2000, 1)];
+    expect(spans(tiles, normal)[0]).toBeCloseTo(ms(normal.base), 9);
+    expect(spans(tiles, big)[0]).toBeCloseTo(ms(big.base), 9);
+  });
+
+  it('never draws a tile shorter than the floor, overlapping in other lanes instead', () => {
+    const tiles = [at(0, 0), at(100, 1), at(200, 2), at(300, 3)];
+    const drawn = spans(tiles, normal);
+    expect(drawn.slice(0, 3)).toEqual([ms(normal.floor), ms(normal.floor), ms(normal.floor)]);
+    expect(drawn[0]).toBeGreaterThan(100);
+    expect(spans(tiles, big)[0]).toBeCloseTo(ms(big.floor), 9);
+  });
+
+  it('never lets two tiles of one lane overlap: that cap wins over the floor', () => {
+    const tiles = [at(0, 0), at(100, 0), at(200, 1)];
+    const [first] = spans(tiles, normal);
+    expect(first).toBeCloseTo(100 - ms(normal.seam), 9);
+    expect(first).toBeLessThan(ms(normal.floor));
+  });
+
+  it('gives both tiles of a double the same span, up to the next start', () => {
+    const tiles = [at(0, 0), at(0, 2), at(500, 1)];
+    expect(spans(tiles, normal).slice(0, 2)).toEqual([500, 500]);
+  });
+
+  it('draws a long tile at least as tall as its note, but not into its lane’s next tile', () => {
+    const tiles = [at(0, 2, 1500), at(300, 1), at(1600, 2), at(1700, 2, 100)];
+    const [long, , , short] = spans(tiles, normal);
+    expect(long).toBe(1500);
+    // A short long tile is still a staircase tile.
+    expect(short).toBeCloseTo(ms(normal.base), 9);
+    const crowded = [at(0, 2, 1500), at(1000, 2)];
+    expect(spans(crowded, normal)[0]).toBeCloseTo(1000 - ms(normal.seam), 9);
+  });
+
+  it('stops looking ahead only once no tile can shorten it, the seam included', () => {
+    // A long tile, then a tap in another lane past its note's end, then one in its own
+    // lane, closer than its note's end plus the seam: that cap still applies.
+    const sizing = { base: 0.5, floor: 0.25, seam: 0.01 };
+    const tiles = [at(0, 0, 500), at(501, 1), at(502, 0)];
+    expect(tileSpan(tiles, 0, 1000, sizing)).toBeCloseTo(492, 9);
+    expect(tileSpan(tiles, 0, 1000, sizing)).toBe(tileSpans(tiles, 1000, sizing)[0]);
+  });
+
+  describe('gives each tile the same span one at a time as all at once', () => {
+    const shipped = import.meta.glob<Chart>('../../public/songs/*.json', {
+      eager: true,
+      import: 'default',
+    });
+    // A dense chart, seeded: doubles, long tiles, gaps around the base and the seam.
+    let seed = 7;
+    const random = () => {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    };
+    const dense: Tile[] = [];
+    for (let t = 0, i = 0; i < 2000; i += 1) {
+      t += [0, 1, 2, 9, 40, 90, 150, 300, 430, 540, 541, 900][Math.floor(random() * 12)] ?? 0;
+      const last = dense.at(-1);
+      const lane = Math.floor(random() * 4);
+      if (last?.t === t && last.lane === lane) continue;
+      dense.push(at(t, lane, random() < 0.2 ? Math.floor(random() * 2000) : undefined));
+    }
+    const charts: [string, Tile[]][] = [['dense', dense]];
+    for (const [path, chart] of Object.entries(shipped)) {
+      for (const [name, difficulty] of Object.entries(chart.difficulties)) {
+        charts.push([`${path.split('/').at(-1)} ${name}`, difficulty.tiles]);
+      }
+    }
+    const frames = [
+      DEFAULT_TILES_FRAME,
+      { exitAlong: 0.28, widthPx: 844, heightPx: 390 },
+      { exitAlong: 0.28, widthPx: 1180, heightPx: 820 },
+    ];
+
+    it.each(charts)('%s', (_, tiles) => {
+      expect(tiles.length).toBeGreaterThan(0);
+      for (const frame of frames) {
+        for (const size of ['normal', 'big'] as const) {
+          for (const windowMs of [1000, 1600 * 1.5]) {
+            const sizing = tileSizing(size, frame);
+            const all = tileSpans(tiles, windowMs, sizing);
+            tiles.forEach((_, i) => {
+              expect(tileSpan(tiles, i, windowMs, sizing), `tile ${i}`).toBe(all[i]);
+            });
+          }
+        }
+      }
+    });
+  });
+
+  it('keeps every tile of a dense passage in its lane, and every tile visible from the floor', () => {
+    // A Hard-like run: 92 ms apart, lanes cycling.
+    const tiles = Array.from({ length: 40 }, (_, i) => at(i * 92, [0, 1, 2, 3, 2, 1][i % 6] ?? 0));
+    const drawn = spans(tiles, normal);
+    tiles.forEach((tile, i) => {
+      const next = tiles.slice(i + 1).find((other) => other.lane === tile.lane);
+      if (next) expect(tile.t + (drawn[i] ?? 0)).toBeLessThan(next.t);
+      expect(drawn[i]).toBeGreaterThan(0);
+    });
   });
 });

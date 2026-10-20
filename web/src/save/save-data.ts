@@ -10,6 +10,8 @@ import {
   MIN_SCROLL_DURATION_MS,
   type Tempo,
   TEMPOS,
+  TILE_SIZES,
+  type TileSize,
 } from '../game/session-contract';
 
 /**
@@ -28,6 +30,8 @@ export interface Settings {
   failMode: FailMode;
   /** Real ms a tile is visible before the hit line. */
   scrollDurationMs: number;
+  /** Tiles: how tall tiles are drawn. Saves from before it read as the default. */
+  tileSize: TileSize;
   /** The speed picked on song select. */
   tempo: Tempo;
   /** 0 to 1, on top of the engine's own headroom. */
@@ -76,6 +80,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   seenIntro: { rhythm: false, tiles: false },
   failMode: 'classic',
   scrollDurationMs: DEFAULT_SCROLL_DURATION_MS,
+  tileSize: 'normal',
   tempo: 1,
   masterVolume: 1,
   accompanimentVolume: 1,
@@ -148,6 +153,7 @@ function parseSettings(json: unknown): Settings {
     scrollDurationMs: isNumberIn(scrollDurationMs, MIN_SCROLL_DURATION_MS, MAX_SCROLL_DURATION_MS)
       ? scrollDurationMs
       : d.scrollDurationMs,
+    tileSize: oneOf(TILE_SIZES, fields.tileSize, d.tileSize),
     tempo: oneOf(TEMPOS, fields.tempo, d.tempo),
     masterVolume: isNumberIn(masterVolume, 0, 1) ? masterVolume : d.masterVolume,
     accompanimentVolume: isNumberIn(accompanimentVolume, 0, 1)

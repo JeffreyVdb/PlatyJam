@@ -182,7 +182,7 @@ export interface ResultsScreen extends Screen {
 function resultHeading(results: FinalResults): string {
   if (results.outcome === 'cleared') return results.perfectBadge ? 'Perfect run' : 'Song cleared';
   const empty = results.failure?.kind === 'emptyTap';
-  if (results.mode === 'tiles') return empty ? 'That was the water' : 'A tile got away';
+  if (results.mode === 'tiles') return empty ? 'Nothing to tap there' : 'A tile got away';
   return empty ? 'That lane was empty' : 'A note got away';
 }
 

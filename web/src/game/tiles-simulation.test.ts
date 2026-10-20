@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Tile } from '../chart/schema';
+import type { TileSizing } from '../scene/lane-layout';
 import { MAX_EVENT_LAG_MS } from './input';
 import { accuracyOf, earnsPerfectBadge } from './scoring';
 import type { FailMode, JudgmentEvent } from './session-contract';
@@ -8,7 +9,6 @@ import {
   appearTime,
   createTilesSimulation,
   exitTime,
-  POP_MS,
   TILES_RULES,
   type TilesRules,
 } from './tiles-simulation';
@@ -25,6 +25,11 @@ const hold = (t: number, lane: number, dur: number): Tile => ({
 // A tile shows 1000 chart ms ahead of the line (at 1×) and is lost 200 ms past it.
 const SCROLL_MS = 1000;
 const EXIT_ALONG = 0.2;
+/**
+ * Tiles as thin as their notes (a tap a line, a long tile its length), so these rules
+ * read in chart time alone; how tall the stage draws them is tested with `sizing`.
+ */
+const THIN: TileSizing = { base: 0, floor: 0, seam: 0 };
 /** A pointer press aimed at chart ms `ms`, counting 40 ms either side of a tile. */
 const at = (ms: number): TileAim => ({ ms, reachMs: 40 });
 
@@ -33,11 +38,12 @@ interface Options {
   failMode?: FailMode;
   durationMs?: number;
   rules?: Partial<TilesRules>;
+  sizing?: TileSizing;
 }
 
 function setup(
   tiles: Tile[],
-  { tempo = 1, failMode = 'classic', durationMs, rules }: Options = {},
+  { tempo = 1, failMode = 'classic', durationMs, rules, sizing = THIN }: Options = {},
 ) {
   const log: JudgmentEvent[] = [];
   const notYet: string[] = [];
@@ -48,6 +54,7 @@ function setup(
     durationMs: durationMs ?? Math.max(0, ...tiles.map((t) => t.t + (t.dur ?? 0))),
     scrollDurationMs: SCROLL_MS,
     exitAlong: EXIT_ALONG,
+    sizing,
     rules,
     onJudgment: (event) => log.push({ ...event }),
     onNotYet: (lane, tileIndex) => notYet.push(`${lane}#${tileIndex}`),
@@ -114,7 +121,7 @@ describe('tiles simulation', () => {
       sim.press('a', 3, 900, at(1300));
       expect(notYet).toEqual([]);
       expect(summary()).toEqual(['empty:miss@3#-1']);
-      expect(sim.failure).toEqual({ kind: 'emptyTap', lane: 3 });
+      expect(sim.failure).toEqual({ kind: 'emptyTap', lane: 3, at: 1300 });
     });
 
     it('takes both tiles of a double, in either order', () => {
@@ -137,17 +144,18 @@ describe('tiles simulation', () => {
       }
     });
 
-    it('counts a tap on the water as an empty tap: a Miss that ends Classic', () => {
+    it('counts a tap on empty space as an empty tap: a Miss that ends Classic', () => {
       const { sim, summary } = setup([tap(1000, 0), tap(1500, 0)]);
       // Between the two tiles, beyond the slack of either.
       sim.press('a', 0, 900, at(1250));
       expect(summary()).toEqual(['empty:miss@0#-1']);
       expect(status(sim)).toBe('failed');
-      expect(sim.failure).toEqual({ kind: 'emptyTap', lane: 0 });
+      // Where along the lane it was, for the stage to mark.
+      expect(sim.failure).toEqual({ kind: 'emptyTap', lane: 0, at: 1250 });
       expect(sim.endMs).toBe(900);
     });
 
-    it('counts a press within the slack around a tile as on it, and just beyond as water', () => {
+    it('counts a press within the slack around a tile as on it, and just beyond as empty space', () => {
       const hits = setup([tap(1000, 1)]);
       hits.sim.press('a', 1, 900, at(1000 - 40));
       expect(hits.summary()).toEqual(['tap:clear@1#0']);
@@ -164,43 +172,32 @@ describe('tiles simulation', () => {
       expect(summary()).toEqual(['tap:clear@0#0']);
     });
 
-    it('lets a cleared tile be pressed again harmlessly while it pops', () => {
+    it('lets a cleared tile be pressed again harmlessly while it rides off the screen', () => {
       const { sim, summary } = setup([tap(1000, 0), tap(1600, 0)]);
       sim.press('a', 0, 800, at(1000));
       sim.press('b', 0, 820, at(1000));
-      sim.press('c', 0, 800 + POP_MS - 1, at(1000));
+      // Long after its pop: it is still drawn, translucent, until it leaves at 1200.
+      sim.press('c', 0, 1190, at(1000));
       expect(summary()).toEqual(['tap:clear@0#0']);
       expect(sim.status).toBe('running');
     });
 
-    it('counts a press where a cleared tile was, once its pop is over, as an empty tap', () => {
+    it('counts a press where a cleared tile was, once it has left the screen, as an empty tap', () => {
       const classic = setup([tap(1000, 0), tap(1600, 1)]);
       classic.sim.press('a', 0, 100, at(1000));
       classic.sim.release('a', 120);
-      classic.sim.press('b', 0, 100 + POP_MS, at(1000));
+      classic.sim.press('b', 0, 1210, at(1000));
       expect(classic.summary()).toEqual(['tap:clear@0#0', 'empty:miss@0#-1']);
-      expect(classic.sim.failure).toEqual({ kind: 'emptyTap', lane: 0 });
+      expect(classic.sim.failure).toEqual({ kind: 'emptyTap', lane: 0, at: 1000 });
 
       const relaxed = setup([tap(1000, 0), tap(1600, 1)], { failMode: 'relaxed' });
       relaxed.sim.press('a', 0, 100, at(1000));
-      relaxed.sim.press('b', 0, 800, at(1000));
+      relaxed.sim.press('b', 0, 800, at(900));
       expect(relaxed.summary()).toEqual(['tap:clear@0#0', 'empty:miss@0#-1']);
       expect(relaxed.sim.status).toBe('running');
       expect(relaxed.sim.score.combo).toBe(0);
       relaxed.sim.press('c', 1, 900, at(1600));
       expect(relaxed.summary().at(-1)).toBe('tap:clear@1#1');
-    });
-
-    it('times the pop in real ms, scaled by the tempo', () => {
-      const { sim, summary } = setup([tap(1000, 0), tap(1600, 1)], {
-        tempo: 1.5,
-        failMode: 'relaxed',
-      });
-      sim.press('a', 0, 100, at(1000));
-      sim.press('b', 0, 100 + POP_MS * 1.5 - 1, at(1000));
-      expect(summary()).toEqual(['tap:clear@0#0']);
-      sim.press('c', 0, 100 + POP_MS * 1.5, at(1000));
-      expect(summary()).toEqual(['tap:clear@0#0', 'empty:miss@0#-1']);
     });
 
     it('claims the next tile in a key’s lane, once it has appeared', () => {
@@ -343,7 +340,7 @@ describe('tiles simulation', () => {
       ]);
     });
 
-    it('can be pressed again while held, and until their pop is over once full', () => {
+    it('can be pressed again while held, and until they have left once full', () => {
       const { sim, summary } = setup([hold(1000, 0, 300), tap(2000, 1)], {
         failMode: 'relaxed',
       });
@@ -352,9 +349,10 @@ describe('tiles simulation', () => {
       sim.release('b', 1110);
       sim.advance(1300);
       expect(summary()).toEqual(['head:clear@0#0', 'tail:clear@0#0']);
-      sim.press('c', 0, 1300 + POP_MS - 1, at(1100));
+      // Its top (1300) leaves the screen at 1500.
+      sim.press('c', 0, 1499, at(1100));
       expect(summary()).toHaveLength(2);
-      sim.press('d', 0, 1300 + POP_MS, at(1100));
+      sim.press('d', 0, 1501, at(1100));
       expect(summary().at(-1)).toBe('empty:miss@0#-1');
     });
 
@@ -376,10 +374,18 @@ describe('tiles simulation', () => {
       expect(sim.status).toBe('running');
     });
 
-    it('are lost whole in Relaxed when never claimed', () => {
+    it('are lost whole in Relaxed when never claimed, once their bottom edge is out', () => {
       const { sim, summary } = setup([hold(1000, 1, 500)], { failMode: 'relaxed' });
-      sim.advance(1300);
+      // One block, lost as its bottom edge (1000) reaches the bottom of the screen.
+      sim.advance(1199);
+      expect(summary()).toEqual([]);
+      sim.advance(1201);
       expect(summary()).toEqual(['head:miss@1#0', 'tail:miss@1#0']);
+      // Its red rides off, a harmless press until its top (1500) leaves at 1700.
+      sim.press('a', 1, 1600, at(1450));
+      expect(summary()).toHaveLength(2);
+      sim.press('b', 1, 1701, at(1600));
+      expect(summary().at(-1)).toBe('empty:miss@1#-1');
     });
 
     it('leave both fingers free: a long tile held while the next tiles are tapped', () => {
@@ -421,6 +427,97 @@ describe('tiles simulation', () => {
     });
   });
 
+  describe('drawn as tall blocks (sizing)', () => {
+    // Tiles reach up to the next start, within 250 to 500 ms; a 10 ms seam in a lane.
+    const SIZED: TileSizing = { base: 0.5, floor: 0.25, seam: 0.01 };
+    const sized = (tiles: Tile[], options: Options = {}) =>
+      setup(tiles, { sizing: SIZED, ...options });
+
+    it('claims a tile pressed anywhere from its bottom edge to its top, slack included', () => {
+      // The tile spans 1000 to 1400 (the next start); the slack is 40 ms either side.
+      for (const ms of [960, 1000, 1200, 1399, 1400, 1439]) {
+        const { sim, summary } = sized([tap(1000, 0), tap(1400, 1)]);
+        sim.press('p', 0, 900, at(ms));
+        expect(summary(), `pressed at ${ms}`).toEqual(['tap:clear@0#0']);
+      }
+      for (const ms of [959, 1441]) {
+        const { sim, summary } = sized([tap(1000, 0), tap(1400, 1)]);
+        sim.press('p', 0, 900, at(ms));
+        expect(summary(), `pressed at ${ms}`).toEqual(['empty:miss@0#-1']);
+      }
+    });
+
+    it('tells staircase neighbours apart by lane', () => {
+      const { sim, summary, notYet } = sized([tap(1000, 0), tap(1300, 1), tap(1600, 2)]);
+      // Level with the first tile's top, in the next lane: the second tile, not yet.
+      sim.press('a', 1, 900, at(1310));
+      expect(notYet).toEqual(['1#1']);
+      sim.press('b', 0, 900, at(1290));
+      sim.press('c', 1, 900, at(1310));
+      expect(summary()).toEqual(['tap:clear@0#0', 'tap:clear@1#1']);
+    });
+
+    it('loses tiles in chart order as their bottom edges reach the bottom, tall or short', () => {
+      // The first is floored to 250 ms (top 1250); the second is capped by its lane's
+      // next tile to 40 ms (top 1140). Their heights don't change when they are lost.
+      const { sim, log } = sized([tap(1000, 0), tap(1100, 1), tap(1150, 1)], {
+        failMode: 'relaxed',
+      });
+      sim.advance(1199);
+      expect(log).toEqual([]);
+      sim.advance(1201);
+      expect(log.map((e) => [e.tileIndex, e.judgment, e.songMs])).toEqual([[0, 'miss', 1200]]);
+      sim.advance(1400);
+      expect(log.map((e) => [e.tileIndex, e.judgment, e.songMs])).toEqual([
+        [0, 'miss', 1200],
+        [1, 'miss', 1300],
+        [2, 'miss', 1350],
+      ]);
+    });
+
+    it('takes a tile no more once it is lost, though most of it is still on screen', () => {
+      // Drawn from 1000 to 1500; at song ms 1250 the screen shows 1050 up.
+      const { sim, summary } = sized([tap(1000, 0), tap(3000, 1)], { failMode: 'relaxed' });
+      sim.press('a', 0, 1250, at(1400));
+      // Lost at 1200, and red from then: pressing it is harmless, not a claim.
+      expect(summary()).toEqual(['tap:miss@0#0']);
+      const early = sized([tap(1000, 0), tap(3000, 1)], { failMode: 'relaxed' });
+      early.sim.press('a', 0, 1199, at(1400));
+      expect(early.summary()).toEqual(['tap:clear@0#0']);
+    });
+
+    it('ends Classic at the first tile lost', () => {
+      const { sim } = sized([tap(1000, 0), tap(1100, 1), tap(1150, 1)]);
+      sim.advance(2000);
+      expect(sim.failure).toEqual({ kind: 'missedTile', lane: 0, tileIndex: 0 });
+      expect(sim.endMs).toBeCloseTo(1200, 9);
+    });
+
+    it('takes new heights from the stage, which move where tiles are drawn', () => {
+      const { sim, summary } = sized([tap(1000, 0), tap(3000, 1)], { failMode: 'relaxed' });
+      sim.advance(1300);
+      expect(summary()).toEqual(['tap:miss@0#0']);
+      // Drawn up to 1500, its red is still under a press at 1360.
+      sim.press('a', 0, 1460, at(1360));
+      expect(summary()).toHaveLength(1);
+      // Now drawn up to 1300 only: the same press finds nothing there.
+      sim.setTileSizing({ base: 0.3, floor: 0.25, seam: 0.01 });
+      sim.press('b', 0, 1460, at(1360));
+      expect(summary()).toEqual(['tap:miss@0#0', 'empty:miss@0#-1']);
+    });
+
+    it('fills a long tile drawn taller than its note over the note, and clears when full', () => {
+      const { sim, log } = sized([hold(1000, 2, 200), tap(3000, 1)]);
+      // Drawn 500 ms tall (the base): pressed near its top, it is still claimed.
+      sim.press('a', 2, 900, at(1450));
+      sim.advance(1300);
+      expect(log.map((e) => [e.unit, e.judgment, e.songMs])).toEqual([
+        ['head', 'clear', 900],
+        ['tail', 'clear', 1200],
+      ]);
+    });
+  });
+
   describe('frame-rate independence', () => {
     type Input =
       | { kind: 'press'; input: string; lane: number; at: number; aim?: number }
@@ -428,7 +525,7 @@ describe('tiles simulation', () => {
 
     // A dense passage: a double, early and late claims, a "not yet", keys, long tiles
     // (one let go early), presses on a tile already cleared, during its pop and after
-    // it, an empty tap and a tile that falls off.
+    // it while it rides off, an empty tap and a tile that falls off.
     const tiles = [
       tap(1000, 0),
       tap(1000, 2),
@@ -541,11 +638,10 @@ describe('tiles simulation', () => {
         'tail:miss@2#6',
         'tap:clear@0#7',
         'tap:clear@0#8',
-        // 2430 in lane 1 is water; then tile 9 is claimed early, pressed again while
-        // it pops, and once more where it was after its pop.
+        // 2430 in lane 1 is empty space; then tile 9 is claimed early, pressed again
+        // while it pops, and once more as it rides off: harmless.
         'empty:miss@1#-1',
         'tap:clear@1#9',
-        'empty:miss@1#-1',
         'tap:clear@3#10',
       ]);
       expect(notYet).toEqual(['0#2']);

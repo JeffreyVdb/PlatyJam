@@ -1,6 +1,6 @@
 import { approximateMs } from '../audio/latency-warning';
 import type { LatencyOffsets } from '../audio/timeline';
-import type { FailMode, GameMode } from '../game/session-contract';
+import type { FailMode, GameMode, TileSize } from '../game/session-contract';
 import type { Settings } from '../save/save-data';
 import { button, choice, el, slider, uid } from './controls';
 import { nearestScrollSpeed, SCROLL_SPEEDS } from './flow';
@@ -22,7 +22,10 @@ export interface SettingsScreenOptions {
   /** The game, fail mode or scroll speed (for the next run), or the delayed-sound warning. */
   onChange: (
     patch: Partial<
-      Pick<Settings, 'gameMode' | 'failMode' | 'scrollDurationMs' | 'latencyWarningMutedAtMs'>
+      Pick<
+        Settings,
+        'gameMode' | 'failMode' | 'scrollDurationMs' | 'tileSize' | 'latencyWarningMutedAtMs'
+      >
     >,
   ) => void;
   /** While a volume slider moves: apply it to the sound at once. */
@@ -53,7 +56,7 @@ function group(title: string, ...children: HTMLElement[]): HTMLElement {
   return section;
 }
 
-/** The game, fail mode, scroll speed, volumes and the latency calibration. */
+/** The game, fail mode, scroll speed, tile size, volumes and the latency calibration. */
 export function createSettingsScreen(options: SettingsScreenOptions): SettingsScreen {
   const frame = screenFrame({
     name: 'settings',
@@ -112,6 +115,23 @@ export function createSettingsScreen(options: SettingsScreenOptions): SettingsSc
     },
   });
 
+  const sizeHint = el(
+    'p',
+    'settings-hint',
+    'Tiles only. Big tiles are taller wherever the song leaves room.',
+  );
+  const tileSize = choice<TileSize>({
+    legend: 'Tile size',
+    options: [
+      { value: 'normal', label: 'Normal' },
+      { value: 'big', label: 'Big' },
+    ],
+    value: initial.tileSize,
+    onChange: (value) => {
+      options.onChange({ tileSize: value });
+    },
+  });
+
   const volume = (kind: VolumeKind, label: string, describedBy?: string) =>
     slider({
       label,
@@ -159,7 +179,7 @@ export function createSettingsScreen(options: SettingsScreenOptions): SettingsSc
   const column = el('div', 'screen-column');
   column.append(
     group('Game', game.node),
-    group('Playing', failMode.node, failHint, scroll.node, scrollHint),
+    group('Playing', failMode.node, failHint, scroll.node, scrollHint, tileSize.node, sizeHint),
     group(
       'Sound',
       master.node,
@@ -195,6 +215,7 @@ export function createSettingsScreen(options: SettingsScreenOptions): SettingsSc
     const speed = nearestScrollSpeed(settings.scrollDurationMs);
     scroll.set(speed.ms);
     scrollHint.textContent = `Tiles take ${seconds(settings.scrollDurationMs)} to reach the line.`;
+    tileSize.set(settings.tileSize);
     master.set(settings.masterVolume);
     accompaniment.set(settings.accompanimentVolume);
     effects.set(settings.effectsVolume);

@@ -138,6 +138,31 @@ describe('parseSave', () => {
     expect(settings.effectsVolume).toBe(0.7);
   });
 
+  it('keeps a saved tile size, and reads anything else as Normal', () => {
+    const read = (value: unknown) =>
+      parseSave({ version: 2, settings: { tileSize: value } }).settings.tileSize;
+    expect(DEFAULT_SETTINGS.tileSize).toBe('normal');
+    expect(read('big')).toBe('big');
+    expect(read('normal')).toBe('normal');
+    for (const bad of ['huge', 'Big', 2, true, null, undefined]) {
+      expect(read(bad)).toBe('normal');
+    }
+  });
+
+  it('loads a save written before the tile size at Normal, keeping everything else', () => {
+    const old = {
+      ...DEFAULT_SETTINGS,
+      gameMode: 'tiles' as const,
+      failMode: 'relaxed' as const,
+      scrollDurationMs: 2000,
+    };
+    const withoutSize = Object.fromEntries(
+      Object.entries(old).filter(([key]) => key !== 'tileSize'),
+    );
+    const { settings } = parseSave({ version: 2, settings: withoutSize });
+    expect(settings).toEqual({ ...old, tileSize: 'normal' });
+  });
+
   it('loads a save written before the latency warning, asking by default', () => {
     const { settings } = parseSave({
       version: 2,
@@ -195,8 +220,9 @@ describe('parseSave', () => {
           ...v1.settings,
           gameMode: 'rhythm',
           seenIntro: { rhythm: false, tiles: false },
-          // Version 1 had no effects: the default.
+          // Version 1 had no effects and one tile size: the defaults.
           effectsVolume: 0.7,
+          tileSize: 'normal',
         },
         bests: {
           'rhythm/fur-elise/normal/1': best(),

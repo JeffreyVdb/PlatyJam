@@ -939,6 +939,98 @@ body {
   font-size: 2rem;
 }
 
+/*
+ * Tiles (PLA-18): the lanes are the whole screen and tiles pass under the HUD, as in
+ * Magic Tiles. The progress runs along the very top with its star marks, the score
+ * sits big in the middle under it, and the judgment and combo below that, all read
+ * over black tiles and light water alike by their shadows. In both orientations: the
+ * tabletop band above is Rhythm's.
+ */
+.play-hud[data-game='tiles'] {
+  --tiles-bar: 28px;
+  --tiles-gap: clamp(8px, 1.8vh, 16px);
+  --tiles-score: clamp(2.75rem, 11vmin, 4.75rem);
+}
+
+.play-hud[data-game='tiles'] .play-meter {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + var(--edge));
+  right: calc(env(safe-area-inset-right) + var(--edge));
+  left: calc(env(safe-area-inset-left) + var(--edge));
+  width: auto;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: var(--tiles-gap);
+}
+
+.play-hud[data-game='tiles'] .play-progress {
+  /* Level with the pause button's middle, and clear of it. */
+  align-self: stretch;
+  height: 4px;
+  margin: calc(var(--tiles-bar) - 4px) calc(52px + 14px) 0 0;
+  background: rgb(243 247 238 / 30%);
+  box-shadow: 0 1px 6px rgb(3 14 22 / 35%);
+}
+
+.play-hud[data-game='tiles'] .play-progress-fill {
+  background: var(--foam);
+  box-shadow: 0 0 8px rgb(243 247 238 / 70%);
+}
+
+.play-hud[data-game='tiles'] .play-star {
+  width: 22px;
+  height: 22px;
+  color: rgb(243 247 238 / 60%);
+}
+
+.play-hud[data-game='tiles'] .play-star.is-earned {
+  color: var(--bill);
+}
+
+.play-hud[data-game='tiles'] .play-score {
+  font-size: var(--tiles-score);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  text-shadow:
+    0 2px 0 rgb(3 14 22 / 35%),
+    0 4px 18px rgb(3 14 22 / 55%);
+}
+
+.hud .play-hud[data-game='tiles'] .play-centre {
+  top: calc(
+    env(safe-area-inset-top) + var(--edge) + var(--tiles-bar) + 2 * var(--tiles-gap) +
+      var(--tiles-score)
+  );
+  gap: 0;
+}
+
+/* The word first, then the combo under it. */
+.play-hud[data-game='tiles'] .play-judgment {
+  order: -1;
+  font-size: clamp(1.75rem, 6.5vmin, 2.75rem);
+  text-shadow:
+    0 0 18px currentcolor,
+    0 2px 10px rgb(3 14 22 / 75%);
+}
+
+.play-hud[data-game='tiles'] .play-combo {
+  font-size: clamp(1.0625rem, 3.6vmin, 1.375rem);
+  font-weight: 720;
+  color: var(--foam);
+  text-shadow: 0 2px 8px rgb(3 14 22 / 80%);
+}
+
+/* A short screen (a phone on its side): the score steps down. */
+@media (max-height: 520px) {
+  .play-hud[data-game='tiles'] {
+    --tiles-score: 2.5rem;
+  }
+
+  .play-hud[data-game='tiles'] .play-judgment {
+    font-size: 1.625rem;
+  }
+}
+
 /* Measures the safe-area insets for script (see app/safe-area.ts). */
 .hud > .safe-area-probe {
   position: fixed;
@@ -1724,11 +1816,33 @@ body {
   }
 }
 
-/* Tiles: black tiles over the water, tapped anywhere; the long one fills up. */
+/*
+ * Tiles, as the stage draws it: the lanes edge to edge on the river gradient, thin
+ * white dividers, a faint line, and full-width ink tiles touching in a staircase.
+ * Every drop falls the same distance (its lane and half again), so tiles of either
+ * height move together; each starts a tile's height after the one before it. A
+ * tapped tile flashes lily and rides off translucent; the long one fills with lily
+ * up to the line, its top rounded.
+ */
 .preview--tiles {
-  --loop: 3.2s;
-  --tile: 24%;
-  background: var(--river-raised);
+  --loop: 3.6s;
+  --tile: 25%;
+  background:
+    radial-gradient(120% 45% at 50% 105%, rgb(247 168 216 / 14%), transparent 70%),
+    linear-gradient(to bottom, #1a4d6a, #2f7d8c);
+  box-shadow: none;
+}
+
+.preview--tiles .preview-lane + .preview-lane {
+  border-left-color: rgb(255 255 255 / 22%);
+}
+
+.preview--tiles .preview-line {
+  top: 75%;
+  height: 1px;
+  margin-top: 0;
+  background: rgb(255 255 255 / 45%);
+  box-shadow: 0 0 8px rgb(255 255 255 / 45%);
 }
 
 .preview--tiles .preview-drop {
@@ -1736,146 +1850,254 @@ body {
 }
 
 .preview--tiles .preview-drop--hold {
-  --tile: 46%;
+  --tile: 50%;
 }
 
+/* The tile is what it leaves behind, translucent; over it, its ink and its flash. */
 .preview--tiles .preview-tile {
+  right: 0.5px;
+  left: 0.5px;
   overflow: hidden;
-  background: var(--river-deep);
-  box-shadow: inset 0 0 0 1px rgb(3 14 22 / 60%);
-  transform-origin: 50% 50%;
+  border-radius: 0;
+  background: rgb(255 255 255 / 15%);
+  box-shadow: none;
 }
 
-.preview-fill {
+.preview--tiles .preview-tile::before,
+.preview--tiles .preview-tile::after {
   position: absolute;
   inset: 0;
-  background: var(--game-tiles);
-  transform: scaleY(0);
-  transform-origin: 50% 100%;
-  animation: inherit;
-  animation-name: preview-fill;
-  animation-timing-function: linear;
+  content: '';
+  animation: preview-ink var(--loop) linear calc(var(--delay) * var(--loop) * -1) infinite;
 }
 
-.preview-drop--high .preview-tile {
-  animation-name: preview-pop-high;
+.preview--tiles .preview-tile::before {
+  background: #06141d;
+}
+
+.preview--tiles .preview-tile::after {
+  z-index: 1;
+  background: var(--game-tiles);
+  opacity: 0;
+  animation-name: preview-flash-tile;
+}
+
+.preview-drop--high {
+  --claim: 0.4;
+}
+
+.preview-drop--low {
+  --claim: 0.58;
+}
+
+/* The finger lands mid-tile when it is claimed. */
+.preview--tiles .preview-finger {
+  top: calc(var(--tile) * 0.55);
+  z-index: 2;
+  animation-name: preview-press-tile;
+}
+
+.preview-drop--high .preview-tile::before,
+.preview-drop--high .preview-tile::after,
+.preview-drop--high .preview-finger {
+  animation-name: preview-ink-high;
+}
+
+.preview-drop--high .preview-tile::after {
+  animation-name: preview-flash-high;
 }
 
 .preview-drop--high .preview-finger {
   animation-name: preview-press-high;
 }
 
-.preview-drop--low .preview-tile {
-  animation-name: preview-pop-low;
+.preview-drop--low .preview-tile::before {
+  animation-name: preview-ink-low;
+}
+
+.preview-drop--low .preview-tile::after {
+  animation-name: preview-flash-low;
 }
 
 .preview-drop--low .preview-finger {
   animation-name: preview-press-low;
 }
 
-.preview-drop--hold .preview-tile {
-  animation-name: preview-pop-hold;
+/* The long tile stays ink while it fills, from when its foot reaches the line. */
+.preview-drop--hold .preview-tile::before,
+.preview-drop--hold .preview-tile::after {
+  animation-name: preview-ink-hold;
 }
 
+.preview-drop--hold .preview-tile::after {
+  animation-name: preview-flash-hold;
+}
+
+.preview-fill {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--game-tiles);
+  transform: translateY(100%);
+  animation: preview-fill var(--loop) linear calc(var(--delay) * var(--loop) * -1) infinite;
+}
+
+/* Its rounded top: a disc as wide as the lane, half above the fill. */
+.preview-fill::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: inherit;
+  content: '';
+  transform: translateY(-50%);
+}
+
+/*
+ * The finger on the long tile stays on the line as the tile slides under it: a carrier
+ * as tall as the drop, so its moves are fractions of the lane, with the dot on top.
+ */
 .preview-drop--hold .preview-finger {
-  top: calc(var(--tile) * 0.8);
+  top: 0;
+  width: 16px;
+  height: 100%;
+  margin-top: -8px;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
   animation-name: preview-press-hold;
+}
+
+.preview-drop--hold .preview-finger::before {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--foam);
+  box-shadow:
+    0 2px 6px rgb(3 14 22 / 55%),
+    0 0 0 5px rgb(243 247 238 / 22%);
+  content: '';
 }
 
 @keyframes preview-fall-through {
   from {
-    transform: translateY(calc(var(--tile) * -1));
+    transform: translateY(-50%);
   }
   to {
     transform: translateY(100%);
   }
 }
 
-@keyframes preview-pop-high {
+@keyframes preview-ink-high {
   0%,
-  30% {
+  40% {
     opacity: 1;
-    transform: none;
   }
-  38%,
+  44%,
   100% {
     opacity: 0;
-    transform: scale(1.3);
+  }
+}
+
+@keyframes preview-flash-high {
+  0%,
+  40% {
+    opacity: 0;
+  }
+  42% {
+    opacity: 0.85;
+  }
+  52%,
+  100% {
+    opacity: 0;
   }
 }
 
 @keyframes preview-press-high {
   0%,
-  22% {
+  33% {
     opacity: 0;
     transform: scale(1.5);
   }
-  29%,
-  34% {
+  39%,
+  44% {
     opacity: 0.95;
     transform: none;
   }
-  42%,
+  52%,
   100% {
     opacity: 0;
   }
 }
 
-@keyframes preview-pop-low {
+@keyframes preview-ink-low {
   0%,
-  62% {
+  58% {
     opacity: 1;
-    transform: none;
+  }
+  62%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes preview-flash-low {
+  0%,
+  58% {
+    opacity: 0;
+  }
+  60% {
+    opacity: 0.85;
   }
   70%,
   100% {
     opacity: 0;
-    transform: scale(1.3);
   }
 }
 
 @keyframes preview-press-low {
   0%,
-  54% {
+  51% {
     opacity: 0;
     transform: scale(1.5);
   }
-  61%,
-  66% {
+  57%,
+  62% {
     opacity: 0.95;
     transform: none;
   }
-  74%,
+  70%,
   100% {
     opacity: 0;
   }
 }
 
-@keyframes preview-pop-hold {
+/* Its foot reaches the line at half the loop and its top at five sixths: it is full. */
+@keyframes preview-ink-hold {
   0%,
-  60% {
+  83% {
     opacity: 1;
-    transform: none;
   }
-  68%,
+  86%,
   100% {
     opacity: 0;
-    transform: scale(1.15);
   }
 }
 
-@keyframes preview-press-hold {
+@keyframes preview-flash-hold {
   0%,
-  18% {
+  83% {
     opacity: 0;
-    transform: scale(1.5);
   }
-  25%,
-  60% {
-    opacity: 0.95;
-    transform: none;
+  85% {
+    opacity: 0.85;
   }
-  68%,
+  95%,
   100% {
     opacity: 0;
   }
@@ -1883,18 +2105,50 @@ body {
 
 @keyframes preview-fill {
   0%,
-  25% {
-    transform: scaleY(0);
+  50% {
+    opacity: 0;
+    transform: translateY(100%);
   }
-  58%,
+  50.1% {
+    opacity: 1;
+    transform: translateY(100%);
+  }
+  83.3%,
   100% {
-    transform: scaleY(1);
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* On the line (half way down the drop, then its top) while the tile slides under it. */
+@keyframes preview-press-hold {
+  0%,
+  44% {
+    opacity: 0;
+    transform: translateY(50%);
+  }
+  50% {
+    opacity: 0.95;
+    transform: translateY(50%);
+  }
+  83.3% {
+    opacity: 0.95;
+    transform: translateY(0);
+  }
+  88%,
+  100% {
+    opacity: 0;
+    transform: translateY(0);
   }
 }
 
 /* Off screen, in a hidden page, and under reduced motion (below): a still frame. */
 .preview.is-offscreen *,
-.is-page-hidden .preview * {
+.preview.is-offscreen *::before,
+.preview.is-offscreen *::after,
+.is-page-hidden .preview *,
+.is-page-hidden .preview *::before,
+.is-page-hidden .preview *::after {
   animation-play-state: paused;
 }
 
@@ -2510,7 +2764,9 @@ body {
   }
 
   /* The previews hold one frame, mid-game: tiles falling, one being played. */
-  .preview * {
+  .preview *,
+  .preview *::before,
+  .preview *::after {
     animation-play-state: paused;
   }
 

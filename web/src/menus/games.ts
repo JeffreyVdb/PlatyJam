@@ -39,7 +39,7 @@ export const GAMES: Record<GameMode, GameInfo> = {
     steps: [
       'Tap the lowest tile first, anywhere on it. The next one is tinted.',
       'Hold long tiles until they fill up.',
-      "A tile that shakes isn't next yet. Don't let one fall off, or tap the water.",
+      "A tile that shakes isn't next yet. Don't let one fall off, or tap empty space.",
     ],
     failHints: {
       classic: 'A tile that falls off, or a tap on empty space, ends the song.',
@@ -69,12 +69,14 @@ const DROPS: Record<GameMode, readonly { lane: number; delay: number; kind: stri
     { lane: 0, delay: 0.5, kind: 'tap' },
     { lane: 2, delay: 0.75, kind: 'tap' },
   ],
+  // A staircase: every drop falls the same way, each a tile's height (a sixth of the
+  // loop) after the one before; the long tile is two.
   tiles: [
     { lane: 0, delay: 0, kind: 'high' },
-    { lane: 2, delay: 0.2, kind: 'low' },
-    { lane: 3, delay: 0.45, kind: 'hold' },
-    { lane: 1, delay: 0.6, kind: 'high' },
-    { lane: 0, delay: 0.8, kind: 'low' },
+    { lane: 2, delay: 1 / 6, kind: 'low' },
+    { lane: 1, delay: 2 / 6, kind: 'high' },
+    { lane: 3, delay: 3 / 6, kind: 'hold' },
+    { lane: 2, delay: 5 / 6, kind: 'low' },
   ],
 };
 
@@ -108,7 +110,7 @@ export function gamePreview(mode: GameMode): HTMLElement {
   const preview = el('div', `preview preview--${mode}`);
   preview.setAttribute('aria-hidden', 'true');
   for (let lane = 0; lane < 4; lane += 1) preview.append(el('span', 'preview-lane'));
-  if (mode === 'rhythm') preview.append(el('span', 'preview-line'));
+  preview.append(el('span', 'preview-line'));
   for (const { lane, delay, kind } of DROPS[mode]) {
     const drop = el('span', `preview-drop preview-drop--${kind}`);
     drop.style.setProperty('--lane', String(lane));

@@ -1,21 +1,31 @@
-import { PerspectiveCamera, Vector3 } from 'three';
+import { OrthographicCamera, PerspectiveCamera, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
+import type { Tile } from '../chart/schema';
+import { createTilesSimulation } from '../game/tiles-simulation';
 import {
   EDGE_PX,
-  exitAlong,
-  exitDepth,
+  FLAT_SLACK_PX,
+  flatFrame,
+  flatLayout,
+  flatSpotAt,
+  frameFlat,
   frameLayout,
   HANDHELD,
   HIGHWAY_WIDTH,
   HUD_BAND_PX,
   laneAtNdc,
   selectLayout,
-  spotAtNdc,
   TABLETOP,
   type HighwayLayout,
   type Insets,
 } from './highway-layout';
-import { tileDepth } from './lane-layout';
+import {
+  FLAT_LINE_LANDSCAPE,
+  FLAT_LINE_PORTRAIT,
+  tileDepth,
+  tileSizing,
+  tileSpans,
+} from './lane-layout';
 
 const half = HIGHWAY_WIDTH / 2;
 
@@ -168,112 +178,145 @@ describe('touch lanes follow the drawn lanes', () => {
   });
 });
 
-describe('the Tiles hit test', () => {
-  const cases = [
-    ['handheld', HANDHELD, 820, 1180],
-    ['handheld on a phone', HANDHELD, 390, 844],
-    ['tabletop', TABLETOP, 1180, 820],
-    ['tabletop on a wide screen', TABLETOP, 1920, 1080],
-  ] as const;
-  const windowMs = 1600 * 1.25;
-  const songMs = 10_000;
+const VIEWPORTS = [
+  ['a phone in portrait', 390, 844, FLAT_LINE_PORTRAIT],
+  ['an iPad in portrait', 820, 1180, FLAT_LINE_PORTRAIT],
+  ['an iPad lying flat', 1180, 820, FLAT_LINE_LANDSCAPE],
+  ['a phone on its side', 844, 390, FLAT_LINE_LANDSCAPE],
+] as const;
 
-  for (const [label, layout, width, height] of cases) {
+describe("Tiles' flat view", () => {
+  for (const [label, width, height, line] of VIEWPORTS) {
     describe(label, () => {
-      const { camera, px } = framed(layout, width, height);
-      /** Where a press at world (x, z) lands, as chart ms (what the session computes). */
-      const aim = (x: number, z: number) => {
-        const { ndcX, ndcY } = px(x, z);
-        const spot = spotAtNdc(camera, ndcX, ndcY, layout);
-        return (
-          spot && { ...spot, ms: songMs - spot.along * windowMs, reachMs: spot.reach * windowMs }
-        );
+      const flat = flatLayout(width, height);
+      const camera = new OrthographicCamera();
+      frameFlat(camera, flat);
+      /** A world point on the lanes, in CSS px from the top left. */
+      const px = (x: number, z: number) => {
+        const p = new Vector3(x, 0, z).project(camera);
+        return { x: ((p.x + 1) / 2) * width, y: ((1 - p.y) / 2) * height };
       };
 
-      it('finds the time of a tile drawn anywhere along any lane', () => {
-        const exitZ = exitDepth(camera, layout, height);
+      it('fills the whole screen with the four lanes, flat, the line where it should be', () => {
+        expect(flat.line).toBe(line);
+        expect(px(-HIGHWAY_WIDTH / 2, 0).x).toBeCloseTo(0, 6);
+        expect(px(HIGHWAY_WIDTH / 2, 0).x).toBeCloseTo(width, 6);
+        expect(px(0, -flat.far).y).toBeCloseTo(0, 6);
+        expect(px(0, 0).y).toBeCloseTo(height * line, 6);
+        expect(px(0, flat.near).y).toBeCloseTo(height, 6);
+        // No perspective: a lane is as wide at the top as at the bottom, and a unit is
+        // as long down the lane as across it.
+        expect(px(-1, -flat.far).x).toBeCloseTo(px(-1, flat.near).x, 6);
+        expect(px(0, 1).y - px(0, 0).y).toBeCloseTo(px(1, 0).x - px(0, 0).x, 6);
+      });
+
+      it('keeps the lead time: a tile reaches the line a scroll window after the top', () => {
+        const windowMs = 1600 * 1.25;
+        const t = 10_000;
+        expect(px(0, tileDepth(t, t - windowMs, windowMs, flat.far)).y).toBeCloseTo(0, 6);
+        expect(px(0, tileDepth(t, t, windowMs, flat.far)).y).toBeCloseTo(height * line, 6);
+      });
+
+      it('finds the lane by quarter of the width, and the time by height', () => {
+        const windowMs = 1600;
+        const songMs = 5000;
         for (let lane = 0; lane < 4; lane += 1) {
-          for (const t of [songMs + windowMs * 0.97, songMs + windowMs / 2, songMs, songMs - 100]) {
-            const z = tileDepth(t, songMs, windowMs, layout.far);
-            if (z > exitZ) continue;
-            const spot = aim(lane - 1.5, z);
-            expect(spot?.lane, `lane ${lane} at ${t}`).toBe(lane);
-            expect(spot?.ms).toBeCloseTo(t, 6);
+          for (const y of [0, height * 0.3, height * line, height - 1]) {
+            const x = ((lane + 0.5) / 4) * width;
+            const spot = flatSpotAt(x, y, flat);
+            expect(spot.lane).toBe(lane);
+            // The time of a tile edge drawn at that height.
+            const ms = songMs - spot.along * windowMs;
+            expect(px(0, tileDepth(ms, songMs, windowMs, flat.far)).y).toBeCloseTo(y, 6);
           }
         }
-      });
-
-      it('counts a press on the head, or within its slack, and no further', () => {
-        const t = songMs + windowMs / 3;
-        const z = tileDepth(t, songMs, windowMs, layout.far);
-        const reach = layout.tileDepth / 2 + layout.tileSlack;
-        for (const side of [-1, 1]) {
-          const inside = aim(-0.5, z + side * reach * 0.98);
-          const outside = aim(-0.5, z + side * reach * 1.02);
-          expect(Math.abs((inside?.ms ?? Infinity) - t)).toBeLessThanOrEqual(inside?.reachMs ?? 0);
-          expect(Math.abs((outside?.ms ?? Infinity) - t)).toBeGreaterThan(outside?.reachMs ?? 0);
+        // The dividers, a hair either side, and the edges of the screen.
+        for (const divider of [1, 2, 3]) {
+          expect(flatSpotAt((divider / 4) * width - 0.5, 10, flat).lane).toBe(divider - 1);
+          expect(flatSpotAt((divider / 4) * width + 0.5, 10, flat).lane).toBe(divider);
         }
-        // The reach covers the whole drawn head.
-        expect(reach).toBeGreaterThan(layout.tileDepth / 2);
+        expect(flatSpotAt(0, 0, flat).lane).toBe(0);
+        expect(flatSpotAt(width, height, flat).lane).toBe(3);
       });
 
-      it('takes a tile just appearing at the far end, but nothing far above it', () => {
-        const reach = layout.tileDepth / 2 + layout.tileSlack;
-        expect(aim(0.5, -layout.far - reach * 0.9)?.lane).toBe(2);
-        expect(aim(0.5, -layout.far - reach * 1.5)).toBeUndefined();
+      it('counts the slack in CSS px along the lane', () => {
+        const windowMs = 1600;
+        const { reach } = flatSpotAt(10, 10, flat);
+        // The slack in chart ms, back in px at the speed tiles move.
+        const msPerPx = windowMs / (height * line);
+        expect((reach * windowMs) / msPerPx).toBeCloseTo(FLAT_SLACK_PX, 6);
       });
 
-      it('keeps the lanes the drawn ones', () => {
-        for (const divider of [-1, 0, 1]) {
-          expect(aim(divider - 0.03, -1)?.lane).toBe(divider + 1);
-          expect(aim(divider + 0.03, -1)?.lane).toBe(divider + 2);
+      it('loses a tile at the bottom edge of the screen', () => {
+        const frame = flatFrame(flat);
+        expect(frame).toMatchObject({ widthPx: width, heightPx: height });
+        expect(frame.exitAlong).toBeCloseTo((1 - line) / line, 9);
+        // A tile's top crossing the exit line is at the bottom edge.
+        const windowMs = 1600;
+        const top = 7000;
+        const lostAt = top + frame.exitAlong * windowMs;
+        expect(px(0, tileDepth(top, lostAt, windowMs, flat.far)).y).toBeCloseTo(height, 6);
+      });
+
+      it('claims a tile pressed anywhere it is drawn, and only there', () => {
+        // A staircase, the simulation's own spans: the same sizing the stage draws with.
+        const windowMs = 1600;
+        const tap = (t: number, lane: number): Tile => ({ t, lane, pitches: [60], vel: 90 });
+        const tiles = [tap(1000, 0), tap(1450, 1), tap(1900, 2), tap(4000, 3)];
+        const sizing = tileSizing('normal', flatFrame(flat));
+        const spans = tileSpans(tiles, windowMs, sizing);
+        const songMs = 600;
+        /** Where on screen tile `index` is drawn: x across its lane, y from top to bottom. */
+        const drawn = (index: number) => {
+          const tile = tiles[index] ?? tap(0, 0);
+          return {
+            x: ((tile.lane + 0.5) / 4) * width,
+            bottom: px(0, tileDepth(tile.t, songMs, windowMs, flat.far)).y,
+            top: px(0, tileDepth(tile.t + (spans[index] ?? 0), songMs, windowMs, flat.far)).y,
+          };
+        };
+        /** A fresh run, one press at (x, y): what it did. */
+        const press = (x: number, y: number) => {
+          const log: string[] = [];
+          const sim = createTilesSimulation({
+            tiles,
+            tempo: 1,
+            failMode: 'relaxed',
+            durationMs: 5000,
+            scrollDurationMs: windowMs,
+            exitAlong: flatFrame(flat).exitAlong,
+            sizing,
+            onJudgment: (e) => log.push(`${e.unit}:${e.judgment}#${e.tileIndex}`),
+            onNotYet: (_, index) => log.push(`notYet#${index}`),
+          });
+          const spot = flatSpotAt(x, y, flat);
+          sim.press('p', spot.lane, songMs, {
+            ms: songMs - spot.along * windowMs,
+            reachMs: spot.reach * windowMs,
+          });
+          return log;
+        };
+        const first = drawn(0);
+        for (const y of [first.bottom - 1, (first.bottom + first.top) / 2, first.top + 0.01]) {
+          if (y < 0 || y > height) continue;
+          expect(press(first.x, y), `at y ${y}`).toEqual(['tap:clear#0']);
         }
-        expect(aim(half + (layout.touch.slack ?? 0) + 0.2, 0)).toBeUndefined();
+        // Its top edge exactly, and within the slack above it.
+        expect(press(first.x, first.top)).toEqual(['tap:clear#0']);
+        if (first.top - FLAT_SLACK_PX * 0.9 > 0) {
+          expect(press(first.x, first.top - FLAT_SLACK_PX * 0.9)).toEqual(['tap:clear#0']);
+        }
+        // Beyond the slack above its top: empty space in that lane.
+        if (first.top - FLAT_SLACK_PX * 1.1 > 0) {
+          expect(press(first.x, first.top - FLAT_SLACK_PX * 1.1)).toEqual(['empty:miss#-1']);
+        }
+        // Staircase neighbours, level with the first tile's top: by lane.
+        const second = drawn(1);
+        expect(second.bottom).toBeCloseTo(first.top, 6);
+        expect(press(second.x, first.top - 2)).toEqual(['notYet#1']);
+        expect(press(first.x, first.top + 2)).toEqual(['tap:clear#0']);
+        expect(press(drawn(2).x, first.top + 2)).toEqual(['empty:miss#-1']);
       });
     });
   }
-});
-
-describe('the Tiles exit line', () => {
-  it('is the near end of the highway when handheld, on screen', () => {
-    for (const [width, height] of [
-      [820, 1180],
-      [390, 844],
-    ] as const) {
-      const { camera, px } = framed(HANDHELD, width, height);
-      expect(exitDepth(camera, HANDHELD, height)).toBe(HANDHELD.near);
-      expect(px(0, HANDHELD.near).y).toBeLessThan(height);
-    }
-  });
-
-  for (const [width, height] of [
-    [1180, 820],
-    [1366, 1024],
-    [1920, 1080],
-  ] as const) {
-    it(`is the bottom of the ${width}x${height} screen on the tabletop`, () => {
-      const { camera, px } = framed(TABLETOP, width, height);
-      const z = exitDepth(camera, TABLETOP, height);
-      expect(px(0, z).y).toBeCloseTo(height, 3);
-      expect(z).toBeGreaterThan(0);
-      expect(z).toBeLessThan(TABLETOP.near);
-    });
-  }
-
-  it('stays above the home indicator on the tabletop', () => {
-    const insets = { top: 24, right: 20, bottom: 20, left: 20 };
-    const { camera, px } = framed(TABLETOP, 1180, 820, insets);
-    expect(px(0, exitDepth(camera, TABLETOP, 820, insets)).y).toBeCloseTo(800, 3);
-  });
-
-  it('loses a head once all of it has crossed the line, in scroll windows', () => {
-    expect(exitAlong(HANDHELD, 1.6)).toBeCloseTo((1.6 + 0.21) / 14, 9);
-    const windowMs = 1600;
-    // At that point the head's far edge sits on the line.
-    for (const layout of [HANDHELD, TABLETOP]) {
-      const t = 5000;
-      const lostAt = t + exitAlong(layout, 0.9) * windowMs;
-      expect(tileDepth(t, lostAt, windowMs, layout.far) - layout.tileDepth / 2).toBeCloseTo(0.9, 9);
-    }
-  });
 });

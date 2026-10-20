@@ -1,4 +1,5 @@
 import { LANES, type Tile, tileEnd } from '../chart/schema';
+import type { TileSizing } from '../scene/lane-layout';
 import { MAX_EVENT_LAG_MS } from './input';
 import { headDeadline, judgeHead, tailReleaseIsSuccessful } from './judgment';
 import { createScore, type Score, scoreUnit } from './scoring';
@@ -121,10 +122,13 @@ export interface Simulation {
   /** Play continues at `songMs`: holds not reclaimed become tail Misses. */
   resume(songMs: number): void;
   /**
-   * Tiles: where the stage's layout loses a tile, past the hit line in scroll windows
-   * (it changes with the layout). Rhythm has no exit line and ignores it.
+   * Tiles: where the stage loses a tile, past the line in scroll windows (the bottom
+   * edge of the screen, so it changes with the screen's shape). Rhythm has no exit
+   * line and ignores it.
    */
   setExitAlong(along: number): void;
+  /** Tiles: how tall tiles are drawn (`tileSizing`). Rhythm ignores it. */
+  setTileSizing(sizing: Readonly<TileSizing>): void;
 }
 
 export function createSimulation({
@@ -384,6 +388,10 @@ export function createSimulation({
 
     setExitAlong() {
       // Rhythm loses a tile at the end of its window, wherever the stage draws it.
+    },
+
+    setTileSizing() {
+      // Rhythm draws every tile alike.
     },
   };
 

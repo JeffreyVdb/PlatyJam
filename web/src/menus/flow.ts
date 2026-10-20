@@ -158,7 +158,16 @@ export function setupKey(
   mode: GameMode,
 ): string {
   const { songId, difficulty, tempo } = selection;
-  return [mode, songId, difficulty, tempo, settings.failMode, settings.scrollDurationMs].join('/');
+  return [
+    mode,
+    songId,
+    difficulty,
+    tempo,
+    settings.failMode,
+    settings.scrollDurationMs,
+    // Rhythm draws every tile alike.
+    mode === 'tiles' ? settings.tileSize : '',
+  ].join('/');
 }
 
 /** The scroll speeds Settings offers, slowest first: real ms a tile is visible. */

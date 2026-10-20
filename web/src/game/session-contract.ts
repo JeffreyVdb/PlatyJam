@@ -16,9 +16,10 @@ import type { Chart, DifficultyName } from '../chart/schema';
  * - `rhythm`: hit each tile on the line, in time. Judged Perfect, Good or Miss.
  * - `tiles`: tap every tile, anywhere on it, before it falls off the screen; timing
  *   doesn't matter, but the tiles go in order. Judged Cleared or Miss. Where a tile
- *   falls off depends on the stage's layout (`GameplaySession.setExitAlong`). With no
- *   timing to judge, the input calibration plays no part: a tile can be claimed while
- *   it is shown, and inputs count at the song time the stage showed when they happened.
+ *   falls off, and how tall it is drawn, depend on the screen
+ *   (`GameplaySession.setTilesFrame`). With no timing to judge, the input calibration
+ *   plays no part: a tile can be claimed while it is shown, and inputs count at the
+ *   song time the stage showed when they happened.
  */
 export const GAME_MODES = ['rhythm', 'tiles'] as const;
 export type GameMode = (typeof GAME_MODES)[number];
@@ -33,6 +34,14 @@ export type Tempo = (typeof TEMPOS)[number];
  */
 export const FAIL_MODES = ['classic', 'relaxed'] as const;
 export type FailMode = (typeof FAIL_MODES)[number];
+
+/**
+ * Tiles: how tall tiles are drawn (`TILE_HEIGHTS` in scene/lane-layout.ts). `normal`
+ * (default) is about a quarter of the screen, `big` a third, for younger players and
+ * bigger thumbs. Only the height changes: lead time, the rules and scoring don't.
+ */
+export const TILE_SIZES = ['normal', 'big'] as const;
+export type TileSize = (typeof TILE_SIZES)[number];
 
 /** How long a tile takes from the top of the lane to the hit line, real ms. */
 export const DEFAULT_SCROLL_DURATION_MS = 1600;
@@ -53,6 +62,8 @@ export interface SessionSetup {
    * tempo: at 1.5× the lane shows 1.5 times as much chart.
    */
   scrollDurationMs: number;
+  /** Tiles: how tall tiles are drawn. Rhythm ignores it. */
+  tileSize: TileSize;
 }
 
 /** The setup once the chart has arrived. */
@@ -209,8 +220,12 @@ export type Failure =
    * hold was released early.
    */
   | { kind: 'missedTile'; lane: number; tileIndex: number }
-  /** A press with nothing to hit: an empty lane (Rhythm), the water between tiles (Tiles). */
-  | { kind: 'emptyTap'; lane: number };
+  /**
+   * A press with nothing to hit: an empty lane (Rhythm), empty space between tiles
+   * (Tiles). Tiles also says where along the lane: `at` is the chart ms of a tile drawn
+   * there (a key presses at the line).
+   */
+  | { kind: 'emptyTap'; lane: number; at?: number };
 
 export interface FinalResults extends ScoreStats {
   outcome: Outcome;
