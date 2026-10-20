@@ -475,7 +475,8 @@ function fadeOrder(a: Voice, b: Voice): number {
  * - a miss or completion that makes room starts at `now + STEAL_FADE_S`, the time the
  *   voices it fades reach 0 and stop, so they are left out from its start on. Both are
  *   scheduled in context time, so a render running late only cuts the fades short;
- * - fades and steals only lower gains, and nothing raises one.
+ * - fades and steals only lower gains, and nothing raises one. Nor does a fade end a
+ *   voice later than its `end`, where `peakFrom` counts it silent: it only shortens it.
  *
  * And why a miss, a completion and a tap are never ducked:
  * - a tap only shares `TAP_RESERVE`, with taps at least `REPEAT_WINDOW_S` apart;
@@ -498,10 +499,13 @@ export function createEffectsPlayer(target: {
     voices = voices.filter((v) => v !== voice);
   };
 
-  /** Fades a voice out over `fadeS`, or sooner if it was already fading faster. */
+  /**
+   * Fades a voice out over `fadeS`, or sooner if it was already fading faster or ends
+   * sooner. It never ends a voice later: the budget counts it silent from `end` on.
+   */
   const fade = (voice: Voice, fadeS: number) => {
     const now = target.context.currentTime;
-    const end = Math.max(now, voice.start) + fadeS;
+    const end = Math.min(Math.max(now, voice.start) + fadeS, voice.end);
     if (voice.stopping && voice.end <= end) return;
     voice.stopping = true;
     if (voice.start > now) {
@@ -510,6 +514,8 @@ export function createEffectsPlayer(target: {
       voice.source.stop(voice.start);
       return;
     }
+    // It is silent by then anyway: its envelope or its sound ends there.
+    if (voice.end <= end) return;
     const param = voice.gain.gain;
     const from = envelopeAt(voice.envelope, now);
     // As in the sampler: ramping to the mirrored level at `now` redraws that stretch
@@ -522,7 +528,7 @@ export function createEffectsPlayer(target: {
       { t: now, v: from },
       { t: end, v: 0 },
     ];
-    voice.end = Math.min(voice.end, end);
+    voice.end = end;
     voice.source.stop(end);
   };
 

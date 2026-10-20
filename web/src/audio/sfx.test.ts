@@ -263,8 +263,9 @@ describe('createEffectsPlayer', () => {
 
   it(`keeps ${MAX_EFFECT_VOICES} voices at most, fading the oldest out`, () => {
     const { player, sources, gains, context } = setup();
+    // The combo still sounds when it is stolen; a clear would be over by then.
     for (let n = 0; n < MAX_EFFECT_VOICES + 1; n += 1) {
-      player.play(n % 2 === 0 ? 'clear' : 'tap');
+      player.play(n === 0 ? 'combo' : n % 2 === 0 ? 'clear' : 'tap');
       context.currentTime += REPEAT_WINDOW_S;
     }
     expect(player.activeVoices()).toBe(MAX_EFFECT_VOICES);
@@ -820,6 +821,43 @@ describe('headroom', () => {
     // It made room: it starts STEAL_FADE_S after the press (expectGuaranteed).
     expect(miss?.source?.startArgs).toEqual([(miss?.at ?? 0) + STEAL_FADE_S]);
     expectWithinBudget(run);
+  });
+
+  it('never lets a fade outlast a fill: quit near its end, then a restart (round 3)', () => {
+    // Four fills end at 10.702; quit fades everything over 150 ms 20 ms before. At round
+    // 3 that kept them sounding to 10.832 while the budget had them silent at 10.702, so
+    // the restart's silence(0) skipped them and these three started beside them at their
+    // level: +0.19 dBFS.
+    const run = driven();
+    const { player, wait, play, fake } = run;
+    for (let n = 0; n < 4; n += 1) player.fill(0.702);
+    wait(0.681999);
+    player.stopAll(150);
+    wait(0.020002);
+    player.stopFills(0);
+    wait(0.0001);
+    play('complete');
+    wait(0.0003333333333333335);
+    play('tap');
+    wait(0.0003125);
+    play('miss');
+    expect(atOutput(peakOf(mixPlayed(fake)))).toBeLessThan(1);
+    expectWithinBudget(run);
+    expect(expectGuaranteed(run).started).toBe(3);
+    for (const source of fake.sources.slice(0, 4)) expect(source.stoppedAt).toBeCloseTo(10.702, 9);
+  });
+
+  it('never lets a fade outlast a fill: stopped 20 ms before its end over 120 ms (round 3)', () => {
+    // At round 3 the four fills sounded to 11.1, and the rest of the budget reached 1.28.
+    const run = driven();
+    const { player, wait, play, fake } = run;
+    const fills = Array.from({ length: 4 }, () => player.fill(1));
+    wait(0.98);
+    for (const fill of fills) fill.stop(120);
+    wait(0.0201);
+    for (const effect of ['complete', 'miss', 'clear', 'tap'] as const) play(effect);
+    expectWithinBudget(run);
+    for (const source of fake.sources.slice(0, 4)) expect(source.stoppedAt).toBeCloseTo(11, 9);
   });
 
   it('ducks nothing on a fast run: 20 tiles a second, doubles, long tiles, a combo', () => {
