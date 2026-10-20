@@ -612,6 +612,28 @@ describe('menus', () => {
     expect(store.settings).toMatchObject({ failMode: 'relaxed', scrollDurationMs: 950 });
   });
 
+  it('offers Tile size, Normal by default, for the next Tiles run, and keeps it', () => {
+    const storage = memoryStorage();
+    const { session, store } = setup({ storage, modes: ['rhythm', 'tiles'] });
+    store.updateSettings({ gameMode: 'tiles' });
+    toSongs(session, 'tiles');
+    tap(buttonNamed('Settings'));
+    const size = (value: string) =>
+      q(`.screen--settings input[value="${value}"]`) as unknown as HTMLInputElement;
+    expect(size('normal').checked).toBe(true);
+    expect(q('.screen--settings').textContent).toContain('Tiles only.');
+    size('big').click();
+    expect(store.settings.tileSize).toBe('big');
+    expect(session.loads.at(-1)).toMatchObject({ mode: 'tiles', tileSize: 'big' });
+    // A relaunch reads it back.
+    menus?.dispose();
+    root.replaceChildren();
+    const again = setup({ storage, modes: ['rhythm', 'tiles'] });
+    expect(again.store.settings.tileSize).toBe('big');
+    toSongs(again.session, 'tiles');
+    expect(again.session.loads.at(-1)).toMatchObject({ tileSize: 'big' });
+  });
+
   it('applies the Effects volume at once and saves it, apart from the others', () => {
     const { session, store, setVolume } = setup();
     toSongs(session);
