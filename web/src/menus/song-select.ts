@@ -1,10 +1,11 @@
 import type { CatalogSong } from '../catalog/schema';
 import { DIFFICULTIES, type DifficultyName } from '../chart/schema';
-import { type Tempo, TEMPOS } from '../game/session-contract';
-import { noteIcon, settingsIcon } from '../hud/icons';
+import { type GameMode, type Tempo, TEMPOS } from '../game/session-contract';
+import { helpIcon, noteIcon, settingsIcon, swapIcon } from '../hud/icons';
 import type { BestScore } from '../save/save-data';
 import { choice, el, iconButton, onGesture, uid } from './controls';
 import { formatDuration, formatTempo, type PlayButton, type Selection } from './flow';
+import { gameBadge } from './games';
 import { type Screen, screenFrame, starRow } from './screens';
 
 export const DIFFICULTY_NAMES: Record<DifficultyName, string> = {
@@ -15,12 +16,17 @@ export const DIFFICULTY_NAMES: Record<DifficultyName, string> = {
 
 export interface SongSelectOptions {
   songs: readonly CatalogSong[];
+  /** The game being played: the badge names it, and the bests are its own. */
+  mode: () => GameMode;
   selection: () => Selection;
   best: (songId: string, difficulty: DifficultyName, tempo: Tempo) => BestScore | undefined;
   onSelect: (patch: Partial<Selection>) => void;
   /** Called synchronously inside the tap (or key press) on the Play tile. */
   onPlay: () => void;
   onBack: () => void;
+  /** Back to Home, where the games are. */
+  onChangeGame: () => void;
+  onHowToPlay: () => void;
   onSettings: () => void;
   onCredits: () => void;
 }
@@ -31,6 +37,7 @@ export interface SongSelect extends Screen {
   setPlay(play: PlayButton): void;
   /** The Play tile: where focus goes back to when the delayed-sound dialog is cancelled. */
   readonly playButton: HTMLElement;
+  readonly howToPlayButton: HTMLElement;
   readonly settingsButton: HTMLElement;
   readonly creditsButton: HTMLElement;
 }
@@ -43,9 +50,10 @@ interface Row {
 }
 
 /**
- * Song select: difficulty tabs over the list of songs (each with its best stars and
- * score for that difficulty and speed), and a panel with the picked song, the speed
- * and the Play tile. Picking is native radio buttons, so a scroll never picks.
+ * Song select: the game being played (and a way to change it), difficulty tabs over
+ * the list of songs (each with its best stars and score in this game, for that
+ * difficulty and speed), and a panel with the picked song, the speed and the Play
+ * tile. Picking is native radio buttons, so a scroll never picks.
  */
 export function createSongSelect(options: SongSelectOptions): SongSelect {
   const { songs } = options;
@@ -55,11 +63,15 @@ export function createSongSelect(options: SongSelectOptions): SongSelect {
     backLabel: 'Back to the title',
     onBack: options.onBack,
   });
+  const game = el('div', 'songs-game');
+  const changeGame = iconButton(swapIcon(), 'Change game', options.onChangeGame, 'Change game');
+  game.append(gameBadge(options.mode()), changeGame);
+  const howToPlayButton = iconButton(helpIcon(), 'How to play', options.onHowToPlay, 'How to play');
   const settingsButton = iconButton(settingsIcon(), 'Settings', options.onSettings, 'Settings');
   const creditsButton = iconButton(noteIcon(), 'Credits', options.onCredits, 'Credits');
   const actions = el('div', 'screen-actions');
-  actions.append(settingsButton, creditsButton);
-  frame.bar.append(actions);
+  actions.append(howToPlayButton, settingsButton, creditsButton);
+  frame.bar.append(game, actions);
 
   // ---- Difficulty tabs and the list ----
   const browse = el('div', 'songs-browse');
@@ -134,6 +146,11 @@ export function createSongSelect(options: SongSelectOptions): SongSelect {
   frame.body.append(browse, panel);
 
   const refresh = () => {
+    const mode = options.mode();
+    const badge = game.firstElementChild;
+    if (badge instanceof HTMLElement && badge.dataset.mode !== mode)
+      badge.replaceWith(gameBadge(mode));
+    frame.section.dataset.mode = mode;
     const selection = options.selection();
     difficulty.set(selection.difficulty);
     speed.set(selection.tempo);
@@ -172,6 +189,7 @@ export function createSongSelect(options: SongSelectOptions): SongSelect {
       if (note.textContent !== text) note.textContent = text;
     },
     playButton: play,
+    howToPlayButton,
     settingsButton,
     creditsButton,
   };

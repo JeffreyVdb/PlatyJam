@@ -1,6 +1,8 @@
 import type { Credits } from '../credits/schema';
+import type { GameMode } from '../game/session-contract';
 import { backIcon, starIcon } from '../hud/icons';
 import { el, iconButton, onGesture, uid, visuallyHidden } from './controls';
+import { GAMES, gamePreview } from './games';
 
 /** A screen the menus controller shows and hides as a whole. */
 export interface Screen {
@@ -74,11 +76,21 @@ const WORDMARK = [
   ['m', -0.13],
 ] as const;
 
+export interface HomeScreenOptions {
+  /** The games to offer, one card each. */
+  modes: readonly GameMode[];
+  /** The game last picked: its card takes focus. */
+  current: () => GameMode;
+  /** Called synchronously inside the tap (or key press) on a card. */
+  onPick: (mode: GameMode) => void;
+}
+
 /**
- * Home: the title and "Tap to play". A tap anywhere on it (or Enter, Space) is the
- * gesture that unlocks the audio, through the engine's document listeners.
+ * Home: the title and a card per game, each with a looping preview. A tap on a card
+ * picks that game and is the gesture that unlocks the audio, through the engine's
+ * document listeners.
  */
-export function createHomeScreen({ onPlay }: { onPlay: () => void }): Screen {
+export function createHomeScreen({ modes, current, onPick }: HomeScreenOptions): Screen {
   const section = el('section', 'screen screen--home');
   const heading = el('h1', 'home-title');
   heading.id = uid('home');
@@ -93,17 +105,38 @@ export function createHomeScreen({ onPlay }: { onPlay: () => void }): Screen {
     word.append(span);
   });
   heading.append(word);
-  const tagline = el(
-    'p',
-    'home-tagline',
-    'Tap the tiles as they reach the line, and play the song.',
-  );
-  const tile = el('button', 'home-tile', 'Tap to play');
-  tile.type = 'button';
-  section.append(heading, tagline, tile);
-  // The whole screen is the target; the tile's own click bubbles here once.
-  onGesture(section, onPlay);
-  return { node: section, focusTarget: () => tile };
+  section.append(heading);
+  if (modes.length > 1) section.append(el('p', 'home-tagline', 'Two ways to play every song.'));
+
+  const cards = el('div', 'mode-cards');
+  cards.dataset.count = String(modes.length);
+  const buttons = new Map<GameMode, HTMLButtonElement>();
+  for (const mode of modes) {
+    const game = GAMES[mode];
+    const card = el('button', 'mode-card');
+    card.type = 'button';
+    card.dataset.mode = mode;
+    card.setAttribute('aria-label', `Play ${game.name}`);
+    const line = el('span', 'mode-card-line', game.line);
+    line.id = uid('mode-line');
+    card.setAttribute('aria-describedby', line.id);
+    const name = el('span', 'mode-card-name');
+    name.append(game.icon(), el('span', 'mode-card-title', game.name));
+    const text = el('span', 'mode-card-text');
+    text.append(name, line, el('span', 'mode-card-play', 'Play'));
+    card.append(gamePreview(mode), text);
+    // Each card is its own gesture target: one tap picks one game, once.
+    onGesture(card, () => {
+      onPick(mode);
+    });
+    buttons.set(mode, card);
+    cards.append(card);
+  }
+  section.append(cards);
+  return {
+    node: section,
+    focusTarget: () => buttons.get(current()) ?? buttons.values().next().value ?? heading,
+  };
 }
 
 // ---- Credits ----

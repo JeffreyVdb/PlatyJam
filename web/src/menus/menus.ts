@@ -28,14 +28,15 @@ import {
   type LatencyWatchView,
   type SwitchPlatform,
 } from './latency-dialog';
+import { createHowToPlay } from './how-to-play';
 import { createCountdownScreen, createPauseScreen, createResultsScreen } from './run-screens';
 import { createCreditsScreen, createHomeScreen, type Screen } from './screens';
 import { createSettingsScreen, type VolumeKind } from './settings-screen';
 import { createSongSelect } from './song-select';
 
 /**
- * The screens around gameplay (PLA-7): Home, song select, settings and credits, and
- * during a run the pause, countdown and results screens. The menus drive the game
+ * The screens around gameplay (PLA-7): Home with its game cards, song select, settings
+ * and credits, How to play, and during a run the pause, countdown and results screens. The menus drive the game
  * only through the `GameSession` contract; the save store keeps the choices and the
  * best scores.
  */
@@ -170,6 +171,12 @@ export function createMenus({
   const play = () => {
     const action = currentPlay().action;
     if (action === 'start') {
+      // The first Tiles run explains the game first; its Got it comes back here.
+      const mode = currentMode();
+      if (mode === 'tiles' && !store.settings.seenIntro[mode]) {
+        openHowToPlay(songSelect.playButton, true);
+        return;
+      }
       latency.sampleNow();
       const measured = latency.latencyMs();
       if (
@@ -202,6 +209,12 @@ export function createMenus({
     render();
   };
 
+  /** A card on Home: inside its tap, so the audio unlocks on the way to the songs. */
+  const pickGame = (mode: GameMode) => {
+    store.updateSettings({ gameMode: mode });
+    go('songs');
+  };
+
   const select = (patch: Partial<Selection>) => {
     selection = { ...selection, ...patch };
     store.updateSettings(patch);
@@ -228,20 +241,56 @@ export function createMenus({
     latencyDialog.focusTarget().focus({ preventScroll: true });
   }
 
-  // ---- Screens ----
+  // ---- How to play ----
 
-  const home = createHomeScreen({
-    onPlay: () => {
-      go('songs');
+  /** Where focus returns when How to play closes, and whether Got it starts the song. */
+  let introOpener: HTMLElement | undefined;
+  let introStarts = false;
+
+  const closeHowToPlay = (restoreFocus: boolean) => {
+    if (!howToPlay.isOpen) return;
+    howToPlay.close();
+    howToPlay.node.remove();
+    songSelect.node.inert = false;
+    if (restoreFocus) introOpener?.focus({ preventScroll: true });
+  };
+
+  function openHowToPlay(from: HTMLElement, startAfter: boolean) {
+    introOpener = from;
+    introStarts = startAfter;
+    songSelect.node.inert = true;
+    howToPlay.open(currentMode());
+    root.append(howToPlay.node);
+    howToPlay.focusTarget().focus({ preventScroll: true });
+  }
+
+  const howToPlay = createHowToPlay({
+    // Inside Got it's tap: before the first run, play carries on from here.
+    onGotIt: (mode) => {
+      store.updateSettings({ seenIntro: { ...store.settings.seenIntro, [mode]: true } });
+      const start = introStarts;
+      closeHowToPlay(!start);
+      if (start) play();
     },
   });
+
+  // ---- Screens ----
+
+  const home = createHomeScreen({ modes, current: currentMode, onPick: pickGame });
   const songSelect = createSongSelect({
     songs,
+    mode: currentMode,
     selection: () => selection,
     best: (songId, difficulty, tempo) => store.best(currentMode(), songId, difficulty, tempo),
     onSelect: select,
     onPlay: play,
     onBack: back,
+    onChangeGame: () => {
+      go('home');
+    },
+    onHowToPlay: () => {
+      openHowToPlay(songSelect.howToPlayButton, false);
+    },
     onSettings: () => {
       openFrom('settings', songSelect.settingsButton);
     },
@@ -281,6 +330,8 @@ export function createMenus({
   });
   const settingsScreen = createSettingsScreen({
     settings: () => store.settings,
+    modes,
+    mode: currentMode,
     offsets,
     outputLatency: () => latency.latencyMs(),
     onChange: (patch) => {
@@ -342,7 +393,10 @@ export function createMenus({
   const render = () => {
     const view = viewFor(menu, session.state);
     // The song list went away under the dialog (an error, say): it has nothing to ask.
-    if (view !== 'songs') closeLatencyDialog(false);
+    if (view !== 'songs') {
+      closeLatencyDialog(false);
+      closeHowToPlay(false);
+    }
     if (view === 'songs') renderPlay();
     if (view === 'pause') pause.refresh();
     if (view === 'countdown') countdown.refresh();
@@ -423,6 +477,13 @@ export function createMenus({
       }
       return;
     }
+    if (howToPlay.isOpen) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeHowToPlay(true);
+      }
+      return;
+    }
     const view = viewFor(menu, session.state);
     if (event.key === 'Escape') {
       if (view === 'play') {
@@ -442,7 +503,7 @@ export function createMenus({
     // Space selects radio buttons; outside Home only Enter is the main action.
     if (space && view !== 'home') return;
     let handled = true;
-    if (view === 'home') go('songs');
+    if (view === 'home') pickGame(currentMode());
     else if (view === 'songs') play();
     else if (view === 'pause') session.resume();
     else if (view === 'results') session.restart();
@@ -463,6 +524,7 @@ export function createMenus({
       for (const off of offs) off();
       clearInterval(poll);
       closeLatencyDialog(false);
+      closeHowToPlay(false);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('online', onConnectivity);
       window.removeEventListener('offline', onConnectivity);
