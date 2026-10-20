@@ -21,13 +21,12 @@ import creditsJson from './credits/credits.json';
 import { parseCredits } from './credits/schema';
 import { installLaneInput } from './game/input';
 import { createGameplaySession, type GameplaySession } from './game/session';
-import { isRunActive } from './game/session-contract';
+import { GAME_MODES, isRunActive } from './game/session-contract';
 import { createAudioDebugSection } from './hud/audio-debug';
 import { createHud, type Hud } from './hud/hud';
 import { createPlayHud } from './hud/play-hud';
 import { createResumeOverlay } from './hud/resume-overlay';
 import { createChartCache } from './menus/chart-cache';
-import { offeredGameModes } from './menus/flow';
 import { createMenus } from './menus/menus';
 import { createRendererHost, type RendererHost } from './render/renderer-host';
 import { createSaveStore, type SaveStore } from './save/save-store';
@@ -125,6 +124,8 @@ function startGame(
   const input = installLaneInput({
     surface: stage,
     laneAt: (x, y) => scene.laneAt(x, y),
+    // Tiles finds the tile under the finger; Rhythm only needs the lane.
+    spotAt: (x, y) => (session.config?.mode === 'tiles' ? scene.spotAt(x, y) : undefined),
     accepting: () => session.acceptsInput(),
     sink: session.input,
   });
@@ -160,7 +161,7 @@ function startGame(
       ...parseCatalog(catalogJson).songs,
       ...(debug ? parseCatalog(debugCatalogJson).songs : []),
     ],
-    modes: offeredGameModes(debug),
+    modes: GAME_MODES,
     credits: parseCredits(creditsJson),
     charts,
     setVolume: (kind, volume) => {
@@ -246,6 +247,8 @@ function main() {
     // the combo and judgment relative to the hit line.
     hudRoot.dataset.layout = scene.layout;
     hudRoot.style.setProperty('--hit-line-y', `${(scene.hitLineY() * 100).toFixed(2)}%`);
+    // Tiles loses a tile where this layout's exit line is.
+    session?.setExitAlong(scene.exitAlong());
   });
   // Every GPU resource died with the old context; rebuild before the loop restarts.
   lifecycle.on('contextrestored', () => {
@@ -279,6 +282,9 @@ function main() {
     session.events.on('judgment', (event) => {
       scene.onJudgment(event);
       playHud?.onJudgment(event);
+    });
+    session.events.on('notyet', (event) => {
+      scene.onNotYet(event);
     });
   }
   host.setFrame((delta, renderer) => {
