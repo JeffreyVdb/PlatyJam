@@ -6,6 +6,7 @@ import { createAudioEngine, type AudioEngine } from './engine';
 import { type LoadProgress, loadPianoSamples, type PianoSamples } from './piano-samples';
 import { createSampler, type Sampler } from './sampler';
 import { createAccompaniment, type Accompaniment, PAUSE_FADE_MS } from './scheduler';
+import { createEffectsPlayer, type EffectsPlayer } from './sfx';
 import { createSubmix } from './submix';
 
 /** Everything the game plays, wired to the engine's interruptions. */
@@ -24,6 +25,11 @@ export interface GameAudio {
    */
   readonly backing: BackingPlayer;
   /**
+   * Tiles' sound effects (`sfx.ts`), through their own submix, beside the
+   * accompaniment's, under the master volume. The session decides what plays.
+   */
+  readonly effects: EffectsPlayer;
+  /**
    * Tunes both pianos to a recording played at `rate` (its tempo): they play at
    * `playbackRate = rate`, so the notes move with the recording's pitch. 1 is
    * concert pitch. Applies to notes started from now on.
@@ -32,6 +38,9 @@ export interface GameAudio {
   /** 0 to 1: the accompaniment's volume. The master volume is `engine.setMasterVolume`. */
   readonly accompanimentVolume: number;
   setAccompanimentVolume(volume: number): void;
+  /** 0 to 1: the effects' volume. */
+  readonly effectsVolume: number;
+  setEffectsVolume(volume: number): void;
   /** Voices sounding on both pianos, for the ?debug readout. */
   activeVoices(): number;
   readonly samples: {
@@ -66,6 +75,9 @@ export function createGameAudio({ bus, base }: GameAudioOptions): GameAudio {
     instrument: accompanimentPiano,
   });
 
+  const effectsMix = createSubmix(engine);
+  const effects = createEffectsPlayer(effectsMix);
+
   const backing = createBackingPlayer({
     loadBuffer: (src) =>
       loadBackingTrack({
@@ -83,16 +95,19 @@ export function createGameAudio({ bus, base }: GameAudioOptions): GameAudio {
       }),
   });
 
-  // Both pianos fade on every stop: the player's notes and tap-pad voices too.
+  // Both pianos fade on every stop: the player's notes and tap-pad voices too. So do
+  // the effects; none starts again on resume.
   engine.events.on('interrupted', () => {
     accompaniment.pause(PAUSE_FADE_MS);
     backing.pause(PAUSE_FADE_MS);
     piano.stopAll(PAUSE_FADE_MS);
+    effects.stopAll(PAUSE_FADE_MS);
   });
   engine.events.on('recreated', () => {
     piano.reset();
     accompanimentPiano.reset();
     backing.reset();
+    effects.reset();
   });
   engine.events.on('resumed', () => {
     accompaniment.resume();
@@ -102,6 +117,7 @@ export function createGameAudio({ bus, base }: GameAudioOptions): GameAudio {
     accompaniment.stopAll(fadeMs);
     backing.stopAll(fadeMs);
     piano.stopAll(fadeMs);
+    effects.stopAll(fadeMs);
   });
 
   const progress: LoadProgress = { loaded: 0, failed: 0, total: 88 };
@@ -119,6 +135,7 @@ export function createGameAudio({ bus, base }: GameAudioOptions): GameAudio {
     piano,
     accompaniment,
     backing,
+    effects,
     setTuning(rate) {
       piano.setPlaybackRate(rate);
       accompanimentPiano.setPlaybackRate(rate);
@@ -128,6 +145,12 @@ export function createGameAudio({ bus, base }: GameAudioOptions): GameAudio {
     },
     setAccompanimentVolume(volume) {
       accompanimentMix.setVolume(volume);
+    },
+    get effectsVolume() {
+      return effectsMix.volume;
+    },
+    setEffectsVolume(volume) {
+      effectsMix.setVolume(volume);
     },
     activeVoices: () => piano.activeVoices() + accompanimentPiano.activeVoices(),
     samples: { progress, ready },
